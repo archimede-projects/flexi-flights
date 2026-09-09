@@ -63,6 +63,7 @@ private sealed interface SearchUiState {
 fun SearchScreen(
     apiKeyStore: ApiKeyStore,
     repository: FlightSearchRepository,
+    onOpenWeekend: () -> Unit,
     onOpenSettings: () -> Unit,
     onBackHome: () -> Unit
 ) {
@@ -123,6 +124,24 @@ fun SearchScreen(
             text = "Ricerca",
             style = MaterialTheme.typography.headlineMedium
         )
+
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            Button(
+                onClick = {},
+                modifier = Modifier.weight(1f)
+            ) {
+                Text("Date fisse")
+            }
+            OutlinedButton(
+                onClick = onOpenWeekend,
+                modifier = Modifier.weight(1f)
+            ) {
+                Text("Weekend")
+            }
+        }
 
         Text(
             text = "Una rotta, date fisse, classe Economy. Usa codici IATA come FCO e MAD.",
