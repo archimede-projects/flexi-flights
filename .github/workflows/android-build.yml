@@ -1,0 +1,168 @@
+name: Android Build
+
+on:
+  push:
+    branches:
+      - main
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: android-build-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Build and publish APK
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Setup JDK 17
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Setup Gradle 9.5.0
+        uses: gradle/actions/setup-gradle@v6
+        with:
+          gradle-version: "9.5.0"
+
+      - name: Install Android SDK 36
+        uses: android-actions/setup-android@v4
+        with:
+          cmdline-tools-version: "14742923"
+          accept-android-sdk-licenses: true
+          log-accepted-android-sdk-licenses: false
+          packages: "platform-tools platforms;android-36 build-tools;36.0.0"
+
+      - name: Prepare version and release metadata
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [[ "${GITHUB_REF}" == refs/tags/v* ]]; then
+            VERSION_NAME="${GITHUB_REF_NAME#v}"
+            VERSION_CODE="${GITHUB_RUN_NUMBER}"
+            RELEASE_TAG="${GITHUB_REF_NAME}"
+            RELEASE_KIND="stable"
+            APK_NAME="VolaFlex-${VERSION_NAME}-debug.apk"
+          else
+            VERSION_NAME="0.1.0-dev.${GITHUB_RUN_NUMBER}"
+            VERSION_CODE="${GITHUB_RUN_NUMBER}"
+            RELEASE_TAG="dev-latest"
+            RELEASE_KIND="development"
+            APK_NAME="VolaFlex-dev.apk"
+          fi
+
+          echo "VERSION_NAME=${VERSION_NAME}" >> "$GITHUB_ENV"
+          echo "VERSION_CODE=${VERSION_CODE}" >> "$GITHUB_ENV"
+          echo "RELEASE_TAG=${RELEASE_TAG}" >> "$GITHUB_ENV"
+          echo "RELEASE_KIND=${RELEASE_KIND}" >> "$GITHUB_ENV"
+          echo "APK_NAME=${APK_NAME}" >> "$GITHUB_ENV"
+
+      - name: Build debug APK
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          gradle :app:assembleDebug \
+            -PVERSION_NAME="${VERSION_NAME}" \
+            -PVERSION_CODE="${VERSION_CODE}" \
+            --stacktrace \
+            --no-daemon
+
+      - name: Prepare APK file
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          APK_SOURCE="app/build/outputs/apk/debug/app-debug.apk"
+
+          if [[ ! -f "${APK_SOURCE}" ]]; then
+            echo "APK not found at ${APK_SOURCE}"
+            exit 1
+          fi
+
+          cp "${APK_SOURCE}" "${APK_NAME}"
+          ls -lh "${APK_NAME}"
+
+      - name: Publish development release
+        if: env.RELEASE_KIND == 'development'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          git tag -f dev-latest "${GITHUB_SHA}"
+          git push origin refs/tags/dev-latest --force
+
+          NOTES="$(cat <<EOF
+          Automated VolaFlex development build.
+
+          Version: ${VERSION_NAME}
+          Commit: ${GITHUB_SHA}
+          GitHub Actions run: ${GITHUB_RUN_NUMBER}
+
+          DEBUG APK for personal sideload testing.
+          EOF
+          )"
+
+          if gh release view dev-latest \
+            --repo "${GITHUB_REPOSITORY}" \
+            > /dev/null 2>&1
+          then
+            gh release edit dev-latest \
+              --repo "${GITHUB_REPOSITORY}" \
+              --title "VolaFlex - Development latest" \
+              --notes "${NOTES}" \
+              --prerelease
+
+            gh release upload dev-latest \
+              "${APK_NAME}" \
+              --repo "${GITHUB_REPOSITORY}" \
+              --clobber
+          else
+            gh release create dev-latest \
+              "${APK_NAME}" \
+              --repo "${GITHUB_REPOSITORY}" \
+              --title "VolaFlex - Development latest" \
+              --notes "${NOTES}" \
+              --prerelease
+          fi
+
+      - name: Publish versioned release
+        if: env.RELEASE_KIND == 'stable'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+
+          if gh release view "${RELEASE_TAG}" \
+            --repo "${GITHUB_REPOSITORY}" \
+            > /dev/null 2>&1
+          then
+            gh release upload "${RELEASE_TAG}" \
+              "${APK_NAME}" \
+              --repo "${GITHUB_REPOSITORY}" \
+              --clobber
+          else
+            gh release create "${RELEASE_TAG}" \
+              "${APK_NAME}" \
+              --repo "${GITHUB_REPOSITORY}" \
+              --title "VolaFlex ${RELEASE_TAG}" \
+              --generate-notes
+          fi
