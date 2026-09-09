@@ -1,12 +1,14 @@
 # SESSION_HANDOFF
 
-**Fase attuale:** Fase 0 — infrastruttura GitHub-only quasi completata; CI e Release validate, manca solo il test sul telefono.
+**Fase attuale:** v1 — Fondamenta. Fase 0 completata al 100%; primo step v1 = firma APK stabile persistente.
 
-**Ultimo step completato con successo:** workflow `Android Build` verde su `main`. Android SDK 36 viene installato con `android-actions/setup-android@v4`; Gradle compila l'APK e GitHub pubblica/aggiorna la Release `VolaFlex - Development latest` con asset `VolaFlex-dev.apk`. Il workflow ignora modifiche solo a `PROJECT_SPEC.md` e `SESSION_HANDOFF.md` per non sprecare build/minuti CI.
+**Ultimo step completato con successo:** Fase 0 confermata end-to-end sul telefono: `VolaFlex-dev.apk` installato, schermata `VolaFlex - Build OK` visibile e versione `0.1.0-dev.3` corretta. Tutti gli 8 criteri della Fase 0 sono soddisfatti.
 
-**Prossimo step immediato:** scaricare `VolaFlex-dev.apk` dalla Release `dev-latest`, installarlo sul telefono Android e confermare che compaiano `VolaFlex - Build OK` e la versione dell'app.
+**Stato firma stabile:** workflow già aggiornato nella repository per `assembleRelease` + `zipalign` + `apksigner`, usando i Secrets `KEYSTORE_BASE64`, `KEYSTORE_PASSWORD`, `KEY_ALIAS`, `KEY_PASSWORD`. Il keystore viene ricostruito solo nel runner e cancellato a fine job.
 
-**Problemi aperti:** test/installazione su telefono non ancora confermati; firma debug stabile da aggiungere dopo la chiusura della Fase 0.
+**Prossimo step immediato:** il proprietario deve generare personalmente il keystore JKS in Codespaces, salvarne un backup esterno a GitHub, creare i quattro GitHub Actions Secrets e poi avviare manualmente `Android Build` con `workflow_dispatch`.
+
+**Problemi/rischi aperti:** la build firmata stabile non è ancora stata eseguita perché i Secrets non sono ancora configurati. Il primo APK con la nuova firma NON può aggiornare `0.1.0-dev.3`: servirà una sola disinstallazione/reinstallazione. Se il keystore stabile viene perso, in futuro non sarà possibile aggiornare l'app già installata con la stessa identità di firma.
 
 **Regola:** dopo ogni decisione, modifica o step completato aggiornare sia `PROJECT_SPEC.md` sia questo file.
 
