@@ -1,11 +1,14 @@
 package com.archimedeprojects.volaflex.data
 
+import com.archimedeprojects.volaflex.data.local.FlightSearchCacheDao
+import com.archimedeprojects.volaflex.data.local.FlightSearchCacheEntity
 import com.archimedeprojects.volaflex.data.network.FlightOptionDto
 import com.archimedeprojects.volaflex.data.network.SerpApiService
 import java.io.IOException
 import kotlinx.serialization.SerializationException
 
 private const val MIN_SEARCHES_LEFT_TO_PROCEED = 5
+private const val CACHE_TTL_MILLIS = 4L * 60L * 60L * 1000L
 
 data class SimpleFlightResult(
     val price: Int,
@@ -14,7 +17,9 @@ data class SimpleFlightResult(
     val departureTime: String,
     val arrivalTime: String,
     val stops: Int,
-    val searchesLeftBeforeSearch: Int
+    val searchesLeftBeforeSearch: Int,
+    val fromCache: Boolean = false,
+    val cachedAtEpochMillis: Long? = null
 )
 
 sealed interface FlightSearchOutcome {
@@ -27,7 +32,9 @@ sealed interface FlightSearchOutcome {
 }
 
 class FlightSearchRepository(
-    private val service: SerpApiService
+    private val service: SerpApiService,
+    private val cacheDao: FlightSearchCacheDao,
+    private val diagnostics: DiagnosticRepository
 ) {
 
     suspend fun searchRoundTrip(
@@ -35,8 +42,35 @@ class FlightSearchRepository(
         departureId: String,
         arrivalId: String,
         outboundDate: String,
-        returnDate: String
+        returnDate: String,
+        forceRefresh: Boolean = false
     ): FlightSearchOutcome {
+        val normalizedDeparture = departureId.trim().uppercase()
+        val normalizedArrival = arrivalId.trim().uppercase()
+        val cacheKey = buildCacheKey(
+            normalizedDeparture,
+            normalizedArrival,
+            outboundDate,
+            returnDate
+        )
+        val now = System.currentTimeMillis()
+        val minimumFreshTimestamp = now - CACHE_TTL_MILLIS
+
+        if (!forceRefresh) {
+            val cached = runCatching {
+                cacheDao.findFresh(cacheKey, minimumFreshTimestamp)
+            }.getOrNull()
+
+            if (cached != null) {
+                diagnostics.log(
+                    requestType = "CACHE",
+                    outcome = "HIT",
+                    message = "$normalizedDeparture→$normalizedArrival $outboundDate/$returnDate"
+                )
+                return FlightSearchOutcome.Success(cached.toSimpleResult())
+            }
+        }
+
         val searchesLeft = when (val quotaResult = readLiveQuota(apiKey)) {
             is QuotaResult.Available -> quotaResult.searchesLeft
             is QuotaResult.Error -> {
@@ -48,17 +82,21 @@ class FlightSearchRepository(
         }
 
         if (searchesLeft <= MIN_SEARCHES_LEFT_TO_PROCEED) {
-            return FlightSearchOutcome.Blocked(
-                "Ricerca bloccata: SerpApi ha $searchesLeft query rimaste. " +
-                    "VolaFlex richiede almeno 6 query residue prima di avviare una ricerca reale."
+            val message = "Ricerca bloccata: SerpApi ha $searchesLeft query rimaste. " +
+                "VolaFlex richiede almeno 6 query residue prima di avviare una ricerca reale."
+            diagnostics.log(
+                requestType = "QUOTA_GUARD",
+                outcome = "BLOCKED",
+                message = message
             )
+            return FlightSearchOutcome.Blocked(message)
         }
 
         return try {
             val response = service.searchGoogleFlights(
                 engine = "google_flights",
-                departureId = departureId,
-                arrivalId = arrivalId,
+                departureId = normalizedDeparture,
+                arrivalId = normalizedArrival,
                 outboundDate = outboundDate,
                 returnDate = returnDate,
                 type = 1,
@@ -70,43 +108,107 @@ class FlightSearchRepository(
             )
 
             if (!response.isSuccessful) {
-                return mapHttpError(response.code(), duringAccountCheck = false)
+                val mapped = mapHttpError(response.code(), duringAccountCheck = false)
+                diagnostics.log(
+                    requestType = "GOOGLE_FLIGHTS",
+                    outcome = "ERROR",
+                    httpStatus = response.code(),
+                    message = mapped.message
+                )
+                return mapped
             }
 
             val body = response.body()
-                ?: return FlightSearchOutcome.Error("SerpApi ha restituito una risposta vuota.")
+            if (body == null) {
+                val message = "SerpApi ha restituito una risposta vuota."
+                diagnostics.log(
+                    requestType = "GOOGLE_FLIGHTS",
+                    outcome = "ERROR",
+                    httpStatus = response.code(),
+                    message = message
+                )
+                return FlightSearchOutcome.Error(message)
+            }
 
             if (!body.error.isNullOrBlank()) {
+                val message = readableSerpApiError(body.error)
+                diagnostics.log(
+                    requestType = "GOOGLE_FLIGHTS",
+                    outcome = "ERROR",
+                    httpStatus = response.code(),
+                    message = message
+                )
                 return FlightSearchOutcome.Error(
-                    message = readableSerpApiError(body.error),
+                    message = message,
                     suggestSettings = looksLikeApiKeyError(body.error)
                 )
             }
 
             val option = (body.bestFlights + body.otherFlights)
                 .firstOrNull { it.price != null && it.flights.isNotEmpty() }
-                ?: return FlightSearchOutcome.Error(
-                    "Nessun volo trovato per questa rotta e queste date. Prova date o aeroporti diversi."
-                )
 
-            FlightSearchOutcome.Success(
-                result = option.toSimpleResult(
-                    currency = body.searchParameters?.currency ?: "EUR",
-                    searchesLeftBeforeSearch = searchesLeft
+            if (option == null) {
+                val message = "Nessun volo trovato per questa rotta e queste date. Prova date o aeroporti diversi."
+                diagnostics.log(
+                    requestType = "GOOGLE_FLIGHTS",
+                    outcome = "EMPTY",
+                    httpStatus = response.code(),
+                    message = message
                 )
+                return FlightSearchOutcome.Error(message)
+            }
+
+            val result = option.toSimpleResult(
+                currency = body.searchParameters?.currency ?: "EUR",
+                searchesLeftBeforeSearch = searchesLeft
             )
+
+            runCatching {
+                cacheDao.upsert(
+                    result.toCacheEntity(
+                        cacheKey = cacheKey,
+                        departureId = normalizedDeparture,
+                        arrivalId = normalizedArrival,
+                        outboundDate = outboundDate,
+                        returnDate = returnDate,
+                        cachedAtEpochMillis = now
+                    )
+                )
+                cacheDao.deleteOlderThan(minimumFreshTimestamp)
+            }
+
+            diagnostics.log(
+                requestType = "GOOGLE_FLIGHTS",
+                outcome = "SUCCESS",
+                httpStatus = response.code(),
+                message = "$normalizedDeparture→$normalizedArrival, ${result.price} ${result.currency}"
+            )
+
+            FlightSearchOutcome.Success(result)
         } catch (_: IOException) {
-            FlightSearchOutcome.Error(
-                "Errore di rete. Controlla la connessione Internet e riprova."
+            val message = "Errore di rete. Controlla la connessione Internet e riprova."
+            diagnostics.log(
+                requestType = "GOOGLE_FLIGHTS",
+                outcome = "ERROR",
+                message = message
             )
+            FlightSearchOutcome.Error(message)
         } catch (_: SerializationException) {
-            FlightSearchOutcome.Error(
-                "SerpApi ha restituito dati in un formato non previsto."
+            val message = "SerpApi ha restituito dati in un formato non previsto."
+            diagnostics.log(
+                requestType = "GOOGLE_FLIGHTS",
+                outcome = "ERROR",
+                message = message
             )
+            FlightSearchOutcome.Error(message)
         } catch (_: Exception) {
-            FlightSearchOutcome.Error(
-                "Errore imprevisto durante la ricerca. Riprova."
+            val message = "Errore imprevisto durante la ricerca. Riprova."
+            diagnostics.log(
+                requestType = "GOOGLE_FLIGHTS",
+                outcome = "ERROR",
+                message = message
             )
+            FlightSearchOutcome.Error(message)
         }
     }
 
@@ -116,47 +218,87 @@ class FlightSearchRepository(
 
             if (!response.isSuccessful) {
                 val mapped = mapHttpError(response.code(), duringAccountCheck = true)
-                return when (mapped) {
-                    is FlightSearchOutcome.Error -> QuotaResult.Error(
-                        message = mapped.message,
-                        suggestSettings = mapped.suggestSettings
-                    )
-                    else -> QuotaResult.Error(
-                        "Impossibile verificare la quota SerpApi. Ricerca bloccata per sicurezza."
-                    )
-                }
+                diagnostics.log(
+                    requestType = "SERPAPI_ACCOUNT",
+                    outcome = "ERROR",
+                    httpStatus = response.code(),
+                    message = mapped.message
+                )
+                return QuotaResult.Error(
+                    message = mapped.message,
+                    suggestSettings = mapped.suggestSettings
+                )
             }
 
             val body = response.body()
-                ?: return QuotaResult.Error(
-                    "Impossibile leggere la quota SerpApi. Ricerca bloccata per sicurezza."
+            if (body == null) {
+                val message = "Impossibile leggere la quota SerpApi. Ricerca bloccata per sicurezza."
+                diagnostics.log(
+                    requestType = "SERPAPI_ACCOUNT",
+                    outcome = "ERROR",
+                    httpStatus = response.code(),
+                    message = message
                 )
+                return QuotaResult.Error(message)
+            }
 
             if (!body.error.isNullOrBlank()) {
+                val message = readableSerpApiError(body.error)
+                diagnostics.log(
+                    requestType = "SERPAPI_ACCOUNT",
+                    outcome = "ERROR",
+                    httpStatus = response.code(),
+                    message = message
+                )
                 return QuotaResult.Error(
-                    message = readableSerpApiError(body.error),
+                    message = message,
                     suggestSettings = looksLikeApiKeyError(body.error)
                 )
             }
 
             val searchesLeft = body.totalSearchesLeft ?: body.planSearchesLeft
-                ?: return QuotaResult.Error(
-                    "SerpApi non ha restituito il numero di query rimaste. Ricerca bloccata per sicurezza."
+            if (searchesLeft == null) {
+                val message = "SerpApi non ha restituito il numero di query rimaste. Ricerca bloccata per sicurezza."
+                diagnostics.log(
+                    requestType = "SERPAPI_ACCOUNT",
+                    outcome = "ERROR",
+                    httpStatus = response.code(),
+                    message = message
                 )
+                return QuotaResult.Error(message)
+            }
 
+            diagnostics.log(
+                requestType = "SERPAPI_ACCOUNT",
+                outcome = "SUCCESS",
+                httpStatus = response.code(),
+                message = "Quota live: $searchesLeft query rimaste"
+            )
             QuotaResult.Available(searchesLeft)
         } catch (_: IOException) {
-            QuotaResult.Error(
-                "Impossibile verificare la quota SerpApi per un errore di rete. Ricerca bloccata per sicurezza."
+            val message = "Impossibile verificare la quota SerpApi per un errore di rete. Ricerca bloccata per sicurezza."
+            diagnostics.log(
+                requestType = "SERPAPI_ACCOUNT",
+                outcome = "ERROR",
+                message = message
             )
+            QuotaResult.Error(message)
         } catch (_: SerializationException) {
-            QuotaResult.Error(
-                "Impossibile interpretare la risposta Account API. Ricerca bloccata per sicurezza."
+            val message = "Impossibile interpretare la risposta Account API. Ricerca bloccata per sicurezza."
+            diagnostics.log(
+                requestType = "SERPAPI_ACCOUNT",
+                outcome = "ERROR",
+                message = message
             )
+            QuotaResult.Error(message)
         } catch (_: Exception) {
-            QuotaResult.Error(
-                "Impossibile verificare la quota SerpApi. Ricerca bloccata per sicurezza."
+            val message = "Impossibile verificare la quota SerpApi. Ricerca bloccata per sicurezza."
+            diagnostics.log(
+                requestType = "SERPAPI_ACCOUNT",
+                outcome = "ERROR",
+                message = message
             )
+            QuotaResult.Error(message)
         }
     }
 
@@ -223,6 +365,54 @@ class FlightSearchRepository(
             stops = layovers.size,
             searchesLeftBeforeSearch = searchesLeftBeforeSearch
         )
+    }
+
+    private fun SimpleFlightResult.toCacheEntity(
+        cacheKey: String,
+        departureId: String,
+        arrivalId: String,
+        outboundDate: String,
+        returnDate: String,
+        cachedAtEpochMillis: Long
+    ): FlightSearchCacheEntity {
+        return FlightSearchCacheEntity(
+            cacheKey = cacheKey,
+            departureId = departureId,
+            arrivalId = arrivalId,
+            outboundDate = outboundDate,
+            returnDate = returnDate,
+            price = price,
+            currency = currency,
+            airlines = airlines,
+            departureTime = departureTime,
+            arrivalTime = arrivalTime,
+            stops = stops,
+            searchesLeftBeforeSearch = searchesLeftBeforeSearch,
+            cachedAtEpochMillis = cachedAtEpochMillis
+        )
+    }
+
+    private fun FlightSearchCacheEntity.toSimpleResult(): SimpleFlightResult {
+        return SimpleFlightResult(
+            price = price,
+            currency = currency,
+            airlines = airlines,
+            departureTime = departureTime,
+            arrivalTime = arrivalTime,
+            stops = stops,
+            searchesLeftBeforeSearch = searchesLeftBeforeSearch,
+            fromCache = true,
+            cachedAtEpochMillis = cachedAtEpochMillis
+        )
+    }
+
+    private fun buildCacheKey(
+        departureId: String,
+        arrivalId: String,
+        outboundDate: String,
+        returnDate: String
+    ): String {
+        return "$departureId|$arrivalId|$outboundDate|$returnDate"
     }
 
     private sealed interface QuotaResult {
