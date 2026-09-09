@@ -3,6 +3,7 @@ package com.archimedeprojects.volaflex.ui
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.Button
 import androidx.compose.material3.MaterialTheme
@@ -15,6 +16,7 @@ import androidx.compose.ui.unit.dp
 @Composable
 fun HomeScreen(
     versionName: String,
+    onOpenSearch: () -> Unit,
     onOpenSettings: () -> Unit
 ) {
     Column(
@@ -36,8 +38,19 @@ fun HomeScreen(
         )
 
         Button(
+            onClick = onOpenSearch,
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(top = 32.dp)
+        ) {
+            Text("Ricerca voli")
+        }
+
+        Button(
             onClick = onOpenSettings,
-            modifier = Modifier.padding(top = 32.dp)
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(top = 12.dp)
         ) {
             Text("Impostazioni")
         }
