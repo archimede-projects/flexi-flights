@@ -10,6 +10,7 @@ import androidx.datastore.preferences.preferencesDataStore
 import java.io.IOException
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.catch
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 
 private val Context.apiKeysDataStore: DataStore<Preferences> by preferencesDataStore(
@@ -53,6 +54,10 @@ class ApiKeyStore(private val context: Context) {
             serpApiConfigured = !apiKeys.serpApiKey.isNullOrBlank(),
             searchApiConfigured = !apiKeys.searchApiKey.isNullOrBlank()
         )
+    }
+
+    suspend fun getSerpApiKey(): String? {
+        return keys.first().serpApiKey?.trim()?.takeIf { it.isNotEmpty() }
     }
 
     suspend fun saveKeys(
