@@ -10,6 +10,8 @@ import androidx.room.PrimaryKey
 import androidx.room.Query
 import androidx.room.Room
 import androidx.room.RoomDatabase
+import androidx.room.migration.Migration
+import androidx.sqlite.db.SupportSQLiteDatabase
 import kotlinx.coroutines.flow.Flow
 
 @Entity(tableName = "flight_search_cache")
@@ -25,6 +27,17 @@ data class FlightSearchCacheEntity(
     val departureTime: String,
     val arrivalTime: String,
     val stops: Int,
+    val searchesLeftBeforeSearch: Int,
+    val cachedAtEpochMillis: Long
+)
+
+@Entity(tableName = "weekend_search_cache")
+data class WeekendSearchCacheEntity(
+    @PrimaryKey val cacheKey: String,
+    val departureId: String,
+    val arrivalId: String,
+    val periodKey: String,
+    val candidatesJson: String,
     val searchesLeftBeforeSearch: Int,
     val cachedAtEpochMillis: Long
 )
@@ -62,6 +75,28 @@ interface FlightSearchCacheDao {
 }
 
 @Dao
+interface WeekendSearchCacheDao {
+    @Query(
+        """
+        SELECT * FROM weekend_search_cache
+        WHERE cacheKey = :cacheKey
+          AND cachedAtEpochMillis >= :minimumTimestamp
+        LIMIT 1
+        """
+    )
+    suspend fun findFresh(
+        cacheKey: String,
+        minimumTimestamp: Long
+    ): WeekendSearchCacheEntity?
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun upsert(entity: WeekendSearchCacheEntity)
+
+    @Query("DELETE FROM weekend_search_cache WHERE cachedAtEpochMillis < :minimumTimestamp")
+    suspend fun deleteOlderThan(minimumTimestamp: Long)
+}
+
+@Dao
 interface DiagnosticEventDao {
     @Insert
     suspend fun insert(event: DiagnosticEventEntity)
@@ -85,18 +120,39 @@ interface DiagnosticEventDao {
 @Database(
     entities = [
         FlightSearchCacheEntity::class,
+        WeekendSearchCacheEntity::class,
         DiagnosticEventEntity::class
     ],
-    version = 1,
+    version = 2,
     exportSchema = false
 )
 abstract class VolaFlexDatabase : RoomDatabase() {
     abstract fun flightSearchCacheDao(): FlightSearchCacheDao
+    abstract fun weekendSearchCacheDao(): WeekendSearchCacheDao
     abstract fun diagnosticEventDao(): DiagnosticEventDao
 
     companion object {
         @Volatile
         private var instance: VolaFlexDatabase? = null
+
+        private val MIGRATION_1_2 = object : Migration(1, 2) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    """
+                    CREATE TABLE IF NOT EXISTS `weekend_search_cache` (
+                        `cacheKey` TEXT NOT NULL,
+                        `departureId` TEXT NOT NULL,
+                        `arrivalId` TEXT NOT NULL,
+                        `periodKey` TEXT NOT NULL,
+                        `candidatesJson` TEXT NOT NULL,
+                        `searchesLeftBeforeSearch` INTEGER NOT NULL,
+                        `cachedAtEpochMillis` INTEGER NOT NULL,
+                        PRIMARY KEY(`cacheKey`)
+                    )
+                    """.trimIndent()
+                )
+            }
+        }
 
         fun getInstance(context: Context): VolaFlexDatabase {
             return instance ?: synchronized(this) {
@@ -104,9 +160,12 @@ abstract class VolaFlexDatabase : RoomDatabase() {
                     context.applicationContext,
                     VolaFlexDatabase::class.java,
                     "volaflex.db"
-                ).build().also { database ->
-                    instance = database
-                }
+                )
+                    .addMigrations(MIGRATION_1_2)
+                    .build()
+                    .also { database ->
+                        instance = database
+                    }
             }
         }
     }
