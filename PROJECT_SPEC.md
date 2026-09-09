@@ -51,7 +51,7 @@ Ricerca per origine, destinazione, numero esatto di notti e periodo/date flessib
 
 ## 2.3 Data ±X giorni
 
-L'utente sceglie data target e X. SearchAPI.io Calendar viene usato quando evita molte query SerpApi. Se non disponibile: SerpApi esaustivo solo su range piccoli oppure campionamento euristico su range grandi.
+L'utente sceglie una data target e un valore X. SearchAPI.io Calendar viene usato quando evita molte query SerpApi. Se non disponibile: SerpApi esaustivo solo su range piccoli oppure campionamento euristico su range grandi.
 
 ## 2.4 Range ampio di date
 
@@ -84,7 +84,13 @@ Filtro nativo SerpApi: `layover_duration=MIN,MAX`, in minuti. Eseguire anche con
 
 ## 2.10 Dettaglio scalo
 
-Mostrare almeno aeroporto, città quando disponibile, paese, durata e overnight quando disponibile.
+Mostrare almeno:
+
+- aeroporto;
+- città quando disponibile;
+- paese;
+- durata;
+- eventuale overnight.
 
 ## 2.11 Maps per scali >8h
 
@@ -157,7 +163,7 @@ Pattern obbligatorio:
 
 `DISCOVERY -> VERIFICA -> DETTAGLIO`
 
-## Discovery
+## 4.1 Discovery
 
 Trovare candidati con poche query usando, a seconda del caso:
 
@@ -168,11 +174,11 @@ Trovare candidati con poche query usando, a seconda del caso:
 - cache locale;
 - campionamento euristico.
 
-## Verifica
+## 4.2 Verifica
 
 Verificare solo 1–3 candidati migliori con SerpApi Google Flights, applicando date precise e filtri disponibili.
 
-## Dettaglio
+## 4.3 Dettaglio
 
 Solo on-demand analizzare/recuperare:
 
@@ -198,11 +204,17 @@ Non scaricare automaticamente il dettaglio completo di decine di risultati.
 - Esclusione compagnie: nativo `exclude_airlines`.
 - Stessa compagnia operativa su tutti i segmenti: controllo Kotlin obbligatorio.
 
+Dati JSON utili disponibili per filtro client-side:
+
+- `layovers[]`: aeroporto/IATA e durata;
+- `flights[]`: singoli segmenti con compagnia e dati del volo;
+- quando presente, informazione del vettore operativo/codeshare da usare per il controllo “stessa compagnia operativa”.
+
 ---
 
 # 6. Modello dati minimo
 
-## DatePriceCandidate
+## 6.1 DatePriceCandidate
 
 - `outboundDate`;
 - `returnDate`;
@@ -212,7 +224,7 @@ Non scaricare automaticamente il dettaglio completo di decine di risultati.
 
 Usato nella fase Discovery.
 
-## FlightItinerary
+## 6.2 FlightItinerary
 
 - prezzo;
 - valuta;
@@ -282,13 +294,24 @@ Usare Calendar soprattutto quando sostituisce circa >=10 query SerpApi. Quando i
 - ricerca completa costosa solo su scelta esplicita;
 - non disabilitare date flessibili.
 
+SearchAPI.io è un acceleratore, non un requisito strutturale.
+
 ---
 
 # 9. Cache
 
 Tecnologia prevista: Room.
 
-Chiave concettuale: origine/i + destinazione/i + date + passeggeri + filtri + provider. Salvare risultato e timestamp e riusare ricerche identiche recenti.
+Chiave concettuale:
+
+- origine/i;
+- destinazione/i;
+- date;
+- passeggeri;
+- filtri;
+- provider.
+
+Salvare risultato e timestamp e riusare ricerche identiche recenti.
 
 ---
 
@@ -374,7 +397,7 @@ Non attivare Immutable Releases mentre usiamo `dev-latest` sovrascrivibile.
 
 Workflow senza Gradle Wrapper: `gradle/actions/setup-gradle` installa Gradle 9.5.0. Il Wrapper potrà essere aggiunto più avanti.
 
-## Firma persistente
+## 13.1 Firma persistente
 
 Keystore JKS stabile generato dal proprietario e mai condiviso in chat.
 
@@ -406,13 +429,14 @@ Signer DN:
 
 Chiave: RSA 4096 bit.
 
-Verifica run #4:
+Verifica run #4 e run #5:
 
 - APK Signature Scheme v2: **true**;
 - APK Signature Scheme v3: **true**;
-- numero signer: **1**.
+- numero signer: **1**;
+- fingerprint SHA-256 identico su entrambe le build.
 
-Il primo APK firmato con la nuova chiave NON può aggiornare `0.1.0-dev.3`, che usa la vecchia firma debug. È necessaria una sola disinstallazione/reinstallazione iniziale. Da quel momento tutti gli aggiornamenti dovranno usare sempre lo stesso keystore.
+La migrazione dalla vecchia `0.1.0-dev.3` firmata con debug key alla nuova firma stabile ha richiesto una sola disinstallazione/reinstallazione. `0.1.0-dev.4` è ora la prima base installata con la firma persistente.
 
 ---
 
@@ -462,7 +486,11 @@ Necessario per paese degli scali ed esclusione di un paese senza consumare API.
 
 ## Keystore stabile gestito dal proprietario
 
-Serve perché Android accetta un APK come aggiornamento solo se firmato in modo compatibile con la versione installata. Il keystore resta sotto il controllo del proprietario, viene conservato come Secret GitHub in forma base64 per la CI e deve avere almeno un backup personale esterno a GitHub.
+Serve perché Android accetta un APK come aggiornamento solo se firmato in modo compatibile con la versione installata. Il keystore resta sotto il controllo del proprietario, viene conservato come Secret GitHub in forma base64 per la CI e ha doppio backup personale esterno a GitHub. La password è conservata separatamente su carta.
+
+## Gestione Secrets via interfaccia web quando `gh` non ha permessi
+
+Nel Codespace il comando `gh secret set` ha restituito `403 Resource not accessible by integration`. Il token disponibile al Codespace non aveva permessi sufficienti per amministrare i repository Secrets. In casi simili usare l'interfaccia web GitHub e non assumere che la CLI abbia automaticamente privilegi amministrativi.
 
 ---
 
@@ -487,7 +515,9 @@ Conferma reale sul telefono ricevuta il 2026-09-09.
 
 Firma stabile persistente: **COMPLETATA TECNICAMENTE IN CI**.
 
-Prossimo controllo operativo: reinstallazione una tantum sul telefono e successivo test di aggiornamento sopra la versione stabile senza disinstallazione.
+Migrazione una tantum alla nuova firma: **COMPLETATA**, con `0.1.0-dev.4` installata e funzionante sul telefono.
+
+Prossimo controllo operativo: installare `0.1.0-dev.5` sopra `0.1.0-dev.4` senza disinstallare, per chiudere la validazione end-to-end della firma persistente.
 
 Poi:
 
@@ -543,8 +573,8 @@ Stima complessiva: 21–30 settimane part-time.
 - Crediti SearchAPI.io potenzialmente one-time: non deve essere single point of failure.
 - Workflow senza Android Studio: debug più lento; mitigazione con CI, Codespaces, diagnostica e telefono reale.
 - Perdita del keystore stabile: gli APK già installati non potranno più essere aggiornati con una nuova chiave; sarà necessaria disinstallazione/reinstallazione. Il keystore ha doppio backup personale esterno a GitHub; la password è conservata separatamente su carta.
-- Migrazione dalla vecchia firma debug `0.1.0-dev.3` alla nuova firma stabile: richiede una sola disinstallazione/reinstallazione iniziale.
-- In Codespaces `gh secret set` può fallire con `403 Resource not accessible by integration` quando il token del Codespace non ha permessi sufficienti sui repository secrets. In tal caso gestire i Secrets tramite interfaccia web GitHub. Non assumere che `gh` nel Codespace abbia permessi amministrativi solo perché il repository è accessibile.
+- Il passaggio dalla vecchia firma debug `0.1.0-dev.3` alla nuova firma stabile ha richiesto una sola disinstallazione/reinstallazione iniziale; questo passaggio è stato completato con l'installazione di `0.1.0-dev.4`.
+- In Codespaces `gh secret set` può fallire con `403 Resource not accessible by integration` quando il token del Codespace non ha permessi sufficienti sui repository Secrets. In tal caso gestire i Secrets tramite interfaccia web GitHub.
 
 ---
 
@@ -567,7 +597,7 @@ Implementato e verificato:
 
 **Fase 0: CHIUSA AL 100%.**
 
-## v1 — firma persistente — completata tecnicamente
+## v1 — firma persistente
 
 Completato e verificato:
 
@@ -584,28 +614,46 @@ Completato e verificato:
 - `apksigner verify`: **success**;
 - firma v2 e v3 valide;
 - fingerprint SHA-256 certificato stabile: `a1f432f512e3d1867ee4b4535fb06a83fae5413ee700113b34e8b926a2767df3`;
-- Release `VolaFlex - Development latest` aggiornata;
-- asset `VolaFlex-dev.apk` versione `0.1.0-dev.4` pubblicato;
-- SHA-256 del file APK build #4: `172e74546de32487999abc48ad04c42b9599b93d35ea8a13574c85b116a399f1`;
-- keystore temporaneo cancellato dal runner a fine job.
+- Release aggiornata con `VolaFlex-dev.apk` versione `0.1.0-dev.4`;
+- SHA-256 file APK build #4: `172e74546de32487999abc48ad04c42b9599b93d35ea8a13574c85b116a399f1`;
+- keystore temporaneo cancellato dal runner;
+- `0.1.0-dev.4` installata sul telefono dopo la disinstallazione una tantum della vecchia `0.1.0-dev.3`;
+- `0.1.0-dev.4` avviata con successo e schermata/versione corrette.
 
-Nota operativa: il connettore GitHub di questa chat non espone un'azione per avviare `workflow_dispatch`; la build #4 è stata attivata con un push tecnico innocuo su `gradle.properties`, ottenendo la stessa pipeline e gli stessi Secrets.
+### Prova B — seconda build con la stessa firma
+
+GitHub Actions run #5:
+
+- trigger: push tecnico innocuo `ci: validate persistent signing update test B`;
+- `assembleRelease`: **success**;
+- `zipalign`: **success**;
+- `apksigner sign`: **success**;
+- `apksigner verify`: **success**;
+- APK Signature Scheme v2: **true**;
+- APK Signature Scheme v3: **true**;
+- numero signer: **1**;
+- fingerprint SHA-256 certificato: `a1f432f512e3d1867ee4b4535fb06a83fae5413ee700113b34e8b926a2767df3` — **IDENTICO alla build #4**;
+- versione generata: `0.1.0-dev.5`;
+- SHA-256 file APK build #5: `e2bc02938b85f8e1301f12294994595ffacdb091fab1baa2e189549d5f622525`;
+- Release `VolaFlex - Development latest` aggiornata con il nuovo `VolaFlex-dev.apk`.
+
+**Stato attuale:** la firma è stabile su due build consecutive. Manca solo la conferma reale che Android installi `0.1.0-dev.5` SOPRA `0.1.0-dev.4` senza disinstallazione.
 
 ---
 
 # 19. Prossimo milestone
 
-**Milestone immediata: migrazione sul telefono + prova reale di aggiornamento con firma stabile.**
+**Milestone immediata: verifica finale aggiornamento in-place con firma persistente.**
 
-Criteri di completamento:
+Criteri:
 
-1. scaricare `VolaFlex-dev.apk` versione `0.1.0-dev.4` dalla Release;
-2. disinstallare una sola volta la vecchia `0.1.0-dev.3` firmata con la debug key precedente;
-3. installare `0.1.0-dev.4` firmata con il certificato stabile;
-4. verificare che l'app si avvii e mostri correttamente la versione;
-5. produrre una build successiva firmata con lo stesso keystore;
-6. verificare che il fingerprint SHA-256 resti `a1f432f512e3d1867ee4b4535fb06a83fae5413ee700113b34e8b926a2767df3`;
-7. installare la build successiva SOPRA `0.1.0-dev.4` senza disinstallazione;
-8. confermare che Android accetta l'aggiornamento e che i dati/app identity restano coerenti.
+1. `0.1.0-dev.4` firmata stabilmente installata sul telefono — **COMPLETATO**;
+2. seconda build generata con lo stesso keystore — **COMPLETATO**;
+3. fingerprint SHA-256 invariato — **COMPLETATO**;
+4. Release aggiornata con `0.1.0-dev.5` — **COMPLETATO**;
+5. scaricare `VolaFlex-dev.apk` versione `0.1.0-dev.5` — **DA FARE**;
+6. installare `0.1.0-dev.5` direttamente sopra `0.1.0-dev.4` senza disinstallare — **DA FARE**;
+7. verificare che Android accetti l'aggiornamento — **DA CONFERMARE**;
+8. verificare nell'app `Versione: 0.1.0-dev.5` — **DA CONFERMARE**.
 
-Solo dopo questo milestone si passa allo step v1 successivo: schermata Impostazioni API key.
+Solo dopo questi ultimi punti la firma persistente sarà considerata validata end-to-end e si passerà allo step v1 successivo: schermata Impostazioni API key.
