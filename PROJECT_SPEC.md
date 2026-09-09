@@ -352,11 +352,11 @@ Cambiare questi pin solo deliberatamente.
 
 ---
 
-# 13. Workflow GitHub-only e distribuzione
+# 13. Workflow GitHub-only, distribuzione e firma
 
 Flusso:
 
-`codice GitHub -> push main -> GitHub Actions -> Gradle -> APK debug -> GitHub Release -> telefono Android`
+`codice GitHub -> push main -> GitHub Actions -> Gradle -> APK -> firma persistente -> GitHub Release -> telefono Android`
 
 Gli APK NON vengono usati come Actions artifacts temporanei.
 
@@ -368,13 +368,28 @@ Durante sviluppo:
 
 Ogni push di codice/config su `main` sposta `dev-latest` e sostituisce l'APK. Release permanenti solo per tag `v*` come `v0.1.0`.
 
-`PROJECT_SPEC.md` e `SESSION_HANDOFF.md` sono esclusi dal trigger `push` tramite `paths-ignore`, così gli aggiornamenti della memoria non consumano build/minuti CI né rigenerano inutilmente l'APK.
+`PROJECT_SPEC.md`, `SESSION_HANDOFF.md` e `.github/workflows/android-build.yml` sono esclusi dal trigger `push` tramite `paths-ignore`. Gli aggiornamenti documentali e le modifiche isolate al workflow non consumano build/minuti CI; un workflow modificato si prova con `workflow_dispatch` quando opportuno.
 
 Non attivare Immutable Releases mentre usiamo `dev-latest` sovrascrivibile.
 
-Workflow iniziale senza Gradle Wrapper: `gradle/actions/setup-gradle` installa Gradle 9.5.0. Il Wrapper potrà essere aggiunto più avanti.
+Workflow senza Gradle Wrapper: `gradle/actions/setup-gradle` installa Gradle 9.5.0. Il Wrapper potrà essere aggiunto più avanti.
 
-Firma iniziale: debug standard. Dopo la validazione completa della Fase 0 introdurre firma debug stabile per permettere aggiornamenti senza disinstallazione.
+## Firma persistente
+
+Decisione v1: usare un keystore JKS stabile generato dal proprietario del progetto fuori dalla chat. Il keystore non deve essere committato nella repository e non deve essere condiviso con ChatGPT.
+
+Il workflow è configurato per:
+
+1. leggere `KEYSTORE_BASE64`, `KEYSTORE_PASSWORD`, `KEY_ALIAS`, `KEY_PASSWORD` dai GitHub Actions Secrets;
+2. ricostruire temporaneamente il keystore in `${RUNNER_TEMP}`;
+3. compilare `assembleRelease` non firmato;
+4. eseguire `zipalign`;
+5. firmare con `apksigner` usando la chiave persistente;
+6. verificare la firma con `apksigner verify --print-certs`;
+7. pubblicare l'APK firmato nella Release;
+8. cancellare il keystore temporaneo dal runner con step `if: always()`.
+
+Il primo APK firmato con la nuova chiave NON potrà aggiornare `0.1.0-dev.3`, che è stato firmato con la vecchia chiave debug del runner. Al primo passaggio alla firma stabile sarà necessaria una sola disinstallazione/reinstallazione. Da quel momento tutti gli aggiornamenti dovranno usare sempre lo stesso keystore.
 
 ---
 
@@ -400,7 +415,7 @@ Riduce drasticamente le query per date/range flessibili senza mantenere due pars
 
 ## Discovery -> Verifica -> Dettaglio
 
-Rende sostenibile la quota e evita brute force.
+Rende sostenibile la quota ed evita brute force.
 
 ## GitHub-only
 
@@ -414,19 +429,23 @@ APK persistente e facilmente scaricabile dal telefono; niente dipendenza dalla r
 
 Evita decine di release inutili durante lo sviluppo.
 
-## `paths-ignore` per i file di memoria
+## `paths-ignore` per memoria e workflow
 
-Evita che l'obbligo di aggiornare `PROJECT_SPEC.md` e `SESSION_HANDOFF.md` generi una build Android a ogni aggiornamento documentale.
+Evita build inutili per aggiornamenti documentali o modifiche isolate alla CI. Le modifiche al workflow si verificano manualmente con `workflow_dispatch`.
 
 ## Database IATA locale
 
 Necessario per paese degli scali ed esclusione di un paese senza consumare API.
 
+## Keystore stabile gestito dal proprietario
+
+Serve perché Android accetta un APK come aggiornamento solo se firmato in modo compatibile con la versione installata. Il keystore resta sotto il controllo del proprietario, viene conservato come Secret GitHub in forma base64 per la CI e deve avere almeno un backup personale esterno a GitHub.
+
 ---
 
 # 16. Roadmap
 
-## Fase 0 — Pipeline infrastrutturale
+## Fase 0 — Pipeline infrastrutturale — **COMPLETATA AL 100%**
 
 Criteri:
 
@@ -435,15 +454,18 @@ Criteri:
 3. build GitHub Actions verde — **COMPLETATO**;
 4. Release `dev-latest` creata/aggiornata — **COMPLETATO**;
 5. asset `VolaFlex-dev.apk` disponibile — **COMPLETATO**;
-6. APK installato sul telefono — **DA CONFERMARE**;
-7. schermata `VolaFlex - Build OK` visibile — **DA CONFERMARE**;
-8. versione build corretta visualizzata — **DA CONFERMARE**.
+6. APK installato sul telefono — **COMPLETATO**;
+7. schermata `VolaFlex - Build OK` visibile — **COMPLETATO**;
+8. versione `0.1.0-dev.3` visualizzata correttamente — **COMPLETATO**.
 
-La Fase 0 non è formalmente chiusa finché i punti 6–8 non vengono confermati sul telefono.
+Conferma reale sul telefono ricevuta il 2026-09-09.
 
 ## v1 — Fondamenta (7–10 settimane stimate GitHub-only)
 
-- firma debug stabile;
+Primo step in corso: **firma stabile persistente**.
+
+Poi:
+
 - impostazioni API key;
 - SerpApi;
 - origine/destinazione singole;
@@ -495,13 +517,16 @@ Stima complessiva: 21–30 settimane part-time.
 - Prezzi Calendar indicativi: verifica finale con SerpApi.
 - Crediti SearchAPI.io potenzialmente one-time: non deve essere single point of failure.
 - Workflow senza Android Studio: debug più lento; mitigazione con CI, Codespaces, diagnostica e telefono reale.
-- Firma debug iniziale non stabile: da correggere dopo chiusura Fase 0.
+- Perdita del keystore stabile: gli APK già installati non potranno più essere aggiornati con una nuova chiave; sarà necessaria disinstallazione/reinstallazione. Il keystore deve avere un backup personale esterno a GitHub e le password devono essere conservate separatamente e in modo sicuro.
+- Migrazione dalla vecchia firma debug `0.1.0-dev.3` alla nuova firma stabile: richiede una sola disinstallazione/reinstallazione iniziale.
 
 ---
 
 # 18. Stato di avanzamento reale
 
-## Implementato e verificato nella repository
+## Fase 0 — completata e verificata end-to-end
+
+Implementato e verificato:
 
 - repository privata `archimede-projects/flexi-flights`;
 - `.gitignore`;
@@ -511,21 +536,57 @@ Stima complessiva: 21–30 settimane part-time.
 - modulo `app/build.gradle.kts`;
 - namespace/applicationId `com.archimedeprojects.volaflex`;
 - `AndroidManifest.xml` con label `VolaFlex`;
-- `MainActivity.kt` Compose con testo `VolaFlex - Build OK` e versione app;
+- `MainActivity.kt` Compose;
 - `.github/workflows/android-build.yml`;
-- Android SDK 36 installato in CI con `android-actions/setup-android@v4`;
-- build Gradle reale completata con successo;
-- Release `VolaFlex - Development latest` / tag `dev-latest` creata e aggiornata;
-- asset `VolaFlex-dev.apk` pubblicato correttamente;
-- `PROJECT_SPEC.md` e `SESSION_HANDOFF.md` esclusi dalle build docs-only tramite `paths-ignore`.
+- Android SDK 36 in CI con `android-actions/setup-android@v4`;
+- build Gradle reale verde;
+- Release `VolaFlex - Development latest` / tag `dev-latest`;
+- asset `VolaFlex-dev.apk`;
+- APK scaricato e installato realmente sul telefono;
+- schermata `VolaFlex - Build OK` verificata sul telefono;
+- versione `0.1.0-dev.3` verificata sul telefono;
+- `PROJECT_SPEC.md` e `SESSION_HANDOFF.md` esclusi dalle build docs-only.
 
-## Da confermare manualmente
+**Fase 0: CHIUSA AL 100%.**
 
-- download APK sul telefono;
-- installazione APK;
-- schermata `VolaFlex - Build OK`;
-- versione corretta visualizzata.
+## v1 — primo step: firma persistente
 
-## Prossimo milestone
+Già applicato nella repository:
 
-Chiudere Fase 0 con test sul telefono. Subito dopo: introdurre firma debug stabile, quindi iniziare v1 con impostazioni API key e prima chiamata SerpApi a date fisse.
+- workflow aggiornato per build `assembleRelease`;
+- `zipalign` prima della firma;
+- firma con `apksigner`;
+- verifica certificato/firma con `apksigner verify --print-certs`;
+- secrets richiesti: `KEYSTORE_BASE64`, `KEYSTORE_PASSWORD`, `KEY_ALIAS`, `KEY_PASSWORD`;
+- eliminazione del keystore temporaneo a fine job;
+- workflow-only changes escluse dai push automatici e verificabili con `workflow_dispatch`.
+
+Ancora da fare dal proprietario:
+
+- generare il keystore stabile in Codespaces;
+- salvarne almeno un backup personale esterno a GitHub;
+- creare i quattro GitHub Actions Secrets;
+- avviare manualmente `Android Build` via `workflow_dispatch`;
+- far verificare a ChatGPT log e certificato della nuova build;
+- disinstallare una sola volta `0.1.0-dev.3` e installare il primo APK firmato stabilmente.
+
+---
+
+# 19. Prossimo milestone
+
+**Milestone immediata: Firma stabile validata.**
+
+Criteri di completamento:
+
+1. keystore JKS generato dal proprietario senza condividerlo in chat;
+2. backup esterno a GitHub completato;
+3. quattro GitHub Actions Secrets creati;
+4. `Android Build` manuale verde con nuovo workflow;
+5. `apksigner verify` verde nei log;
+6. fingerprint/certificato della firma registrato come riferimento tecnico non segreto;
+7. `VolaFlex-dev.apk` aggiornato nella Release;
+8. vecchia app debug disinstallata una sola volta;
+9. APK con firma stabile installato sul telefono;
+10. una build successiva firmata con lo stesso certificato installabile sopra la precedente senza disinstallazione.
+
+Solo dopo questo milestone si passa allo step v1 successivo: schermata Impostazioni API key.
