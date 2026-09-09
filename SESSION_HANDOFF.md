@@ -1,20 +1,18 @@
 # SESSION_HANDOFF
 
-**Fase attuale:** v1 — Fondamenta. Fase 0, firma persistente, Impostazioni API key e prima ricerca reale SerpApi sono confermate nel mondo reale. Gli ultimi tre elementi v1 (IATA guard, Room cache 4h, Diagnostica) sono implementati e CI verde; manca solo il test sul telefono.
+**Fase attuale:** v2 — Date flessibili. **v1 “Fondamenta” è CHIUSA e validata al 100% sul telefono reale.** Anti-typo IATA, Room cache 4h e Diagnostica hanno superato tutti i test; l'intero round finale ha consumato 1 sola query SerpApi, esattamente coerente con la stima.
 
-**Ultimo successo reale:** build `0.1.0-dev.13`, ricerca `FCO → MAD`, 16–19 ottobre 2026: Ryanair 104 EUR round-trip, 0 scali andata, quota live 131/250 prima della ricerca. Nessun crash; firma invariata.
+**Ultimo step completato:** v2.1 “Weekend flessibile — Discovery con SerpApi Google Travel Explore” implementato e validato in CI. GitHub Actions run #16 = SUCCESS, build `0.1.0-dev.16`; KSP/Kotlin/assembleRelease/firma/Release riusciti. Fingerprint invariato: `a1f432f512e3d1867ee4b4535fb06a83fae5413ee700113b34e8b926a2767df3`.
 
-**Ultimo successo CI:** GitHub Actions run #15 = SUCCESS, build `0.1.0-dev.15`. Room 2.8.4 + KSP 2.3.11 compilano correttamente; `assembleRelease`, firma e Release riusciti. Fingerprint invariato: `a1f432f512e3d1867ee4b4535fb06a83fae5413ee700113b34e8b926a2767df3`.
+**Implementato v2.1:** modalità `Ricerca → Weekend`; un'origine + una destinazione; scelta singolo mese tra i prossimi 6 oppure `Prossimi 2 mesi`/`Prossimi 3 mesi`; `engine=google_travel_explore`, `travel_duration=1` Weekend; 1 query Explore per mese; Account API live prima del batch; riserva minima 5 query; candidati con date/prezzo/destinazione; Diagnostica `TRAVEL_EXPLORE`; Room cache 4h con chiave origine+destinazione+periodo e `Aggiorna comunque`; database Room v1→v2 con migrazione esplicita che aggiunge `weekend_search_cache`.
 
-**Implementato ora:** directory locale strutturata di circa 180–200 aeroporti (`IATA/nome/città/ISO country`); warning per IATA sconosciuto con `Correggi` / `Cerca comunque`; Room cache chiave `origine|destinazione|andata|ritorno`, TTL 4h; cache hit salta Account API e Google Flights; `Aggiorna comunque` forza refresh; Diagnostica persistente ultimi 20 eventi (`SERPAPI_ACCOUNT`, `GOOGLE_FLIGHTS`, `CACHE`, `QUOTA_GUARD`) con timestamp/status HTTP/messaggio e pulsante `Copia diagnostica`. Nessuna API key viene registrata.
+**Prossimo step immediato:** installare `0.1.0-dev.16` sopra la build attuale senza disinstallare e testare `FCO → MAD`, modalità Weekend, **ottobre 2026**. Atteso: un candidato Discovery con andata/ritorno e prezzo indicativo; Diagnostica `SERPAPI_ACCOUNT` + `TRAVEL_EXPLORE`; ripetizione identica entro 4h da cache.
 
-**Prossimo step immediato:** installare `0.1.0-dev.15` sopra la versione corrente e validare: (1) `FC0 → MAD` mostra warning senza query; premere `Correggi`; (2) fare `FCO → MAD` con date fisse una prima volta; (3) ripetere identico entro 4h e verificare `Risultato da cache — aggiornato alle HH:MM`; (4) Impostazioni → Diagnostica, verificare gli eventi e `Copia diagnostica`.
+**Consumo test previsto:** prima ricerca su un solo mese = Account API gratuita + **1 query Travel Explore**; ripetizione identica da cache = **0 query**. Totale atteso del round: **1 query SerpApi**. `Prossimi 2 mesi` costa fino a 2 query Explore; `Prossimi 3 mesi` fino a 3.
 
-**Consumo test previsto:** warning `FC0` = 0 query; prima ricerca valida = 1 Google Flights + Account API gratuita; seconda identica da cache = 0 query. Non premere `Aggiorna comunque` salvo test esplicito, perché aggiunge una nuova query voli.
+**Limite intenzionale:** v2.1 è solo Discovery. Non verifica ancora venerdì sera/sabato mattina e domenica sera/lunedì con Google Flights; questo è il prossimo raffinamento dopo il test reale. SearchAPI.io Calendar non entra ancora: sarà usato nel sotto-step N notti/±X.
 
-**Nota CI:** run #14 è stato cancellato automaticamente da `cancel-in-progress` quando è partito il run #15 sul commit funzionale; non era un errore di codice.
-
-**Problemi aperti:** nessun problema noto di build/firma. Da verificare solo comportamento reale di IATA warning, cache e clipboard diagnostica sul telefono. Il dettaglio ritorno via `departure_token`, filtri avanzati, weekend/date flessibili e multi-aeroporto restano successivi.
+**Problemi aperti:** nessun problema noto CI/firma. Da validare sul telefono: migrazione Room 1→2 e risposta reale Travel Explore. Se compare un errore, usare Impostazioni → Diagnostica → `Copia diagnostica` e incollare il testo in chat senza API key.
 
 **Regola:** dopo ogni decisione, modifica o step completato aggiornare sia `PROJECT_SPEC.md` sia questo file.
 
