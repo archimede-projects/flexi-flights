@@ -1,15 +1,14 @@
 # VolaFlex — PROJECT_SPEC
 
 **Repository:** `archimede-projects/flexi-flights` (privata)  
+**Nome app:** VolaFlex  
 **Application ID / namespace:** `com.archimedeprojects.volaflex`  
-**Ruolo di questo file:** fonte di verità persistente del progetto.  
+**Ruolo:** fonte di verità persistente del progetto.  
 **Ultimo aggiornamento:** 2026-09-09
 
 ## Regola di manutenzione
 
-Aggiornare questo file ogni volta che cambia un requisito, una decisione architetturale, una tecnologia, una policy API/quota o lo stato reale di avanzamento. Non contraddire decisioni già registrate senza richiesta esplicita del proprietario.
-
-`SESSION_HANDOFF.md` contiene invece solo lo stato operativo sintetico per riprendere il lavoro in una nuova chat.
+Aggiornare questo file ogni volta che cambia un requisito, una decisione architetturale, una tecnologia, una policy API/quota o lo stato reale di avanzamento. Non contraddire decisioni già registrate senza richiesta esplicita del proprietario. `SESSION_HANDOFF.md` contiene solo lo stato operativo sintetico per riprendere il lavoro in una nuova chat.
 
 ---
 
@@ -17,7 +16,7 @@ Aggiornare questo file ogni volta che cambia un requisito, una decisione archite
 
 VolaFlex è un'app Android personale per cercare voli economici con forte supporto a date flessibili, weekend, multi-aeroporto e filtri sugli scali.
 
-Vincoli non negoziabili attuali:
+Vincoli attuali:
 
 - uso personale;
 - APK sideload, niente Play Store per ora;
@@ -25,10 +24,11 @@ Vincoli non negoziabili attuali:
 - nessuna carta di credito/debito richiesta;
 - niente backend/server a pagamento;
 - sviluppo GitHub-only;
-- repository privata GitHub;
-- nessun Android Studio installato localmente;
-- GitHub Actions per la build;
-- GitHub Releases per distribuire gli APK;
+- repository GitHub privata;
+- nessun Android Studio locale;
+- GitHub Actions per build/CI;
+- GitHub Releases per distribuire l'APK;
+- test UI iniziale su telefono Android reale;
 - proprietario del progetto principiante assoluto.
 
 ---
@@ -43,26 +43,19 @@ Ricerca configurabile con pattern:
 - ritorno domenica sera oppure lunedì;
 - ricerca su più settimane/mesi.
 
-L'app può usare discovery + verifica invece di interrogare brutalmente ogni combinazione.
+L'app può usare discovery + verifica invece di interrogare ogni combinazione.
 
 ## 2.2 Numero di notti
 
-Ricerca per:
-
-- origine;
-- destinazione;
-- numero esatto di notti;
-- periodo/date flessibili.
-
-L'app cerca i periodi più economici compatibili.
+Ricerca per origine, destinazione, numero esatto di notti e periodo/date flessibili, trovando i periodi più economici compatibili.
 
 ## 2.3 Data ±X giorni
 
-L'utente imposta una data target e un valore X. SearchAPI.io Calendar viene usato come acceleratore quando evita molte query SerpApi. Se non disponibile, usare una ricerca SerpApi esaustiva solo per range piccoli oppure campionamento euristico per range grandi.
+L'utente sceglie data target e X. SearchAPI.io Calendar viene usato quando evita molte query SerpApi. Se non disponibile: SerpApi esaustivo solo su range piccoli oppure campionamento euristico su range grandi.
 
 ## 2.4 Range ampio di date
 
-Esempio: 1–30 giugno. Evitare una query SerpApi per ogni singolo giorno quando esistono strategie di discovery più economiche.
+Esempio: 1–30 giugno. Evitare una query SerpApi per ogni giorno quando esistono strategie più efficienti.
 
 ## 2.5 Multi-origine
 
@@ -79,37 +72,23 @@ Supportare:
 
 ## 2.7 Esclusione paese per gli scali
 
-Esempio: nessuno scalo nel Regno Unito.
-
-SerpApi non offre un filtro nativo per paese di scalo. Implementazione Kotlin tramite lookup locale `IATA -> ISO country` e filtro dell'itinerario.
+Esempio: nessuno scalo nel Regno Unito. SerpApi non offre filtro nativo per paese: implementare in Kotlin con lookup locale `IATA -> ISO country`.
 
 ## 2.8 Stessa compagnia su tutte le tratte
 
-Opzione: tutte le singole tratte devono essere operate dalla stessa compagnia.
-
-`include_airlines` di SerpApi è utile come pre-filtro ma non viene considerato sufficiente per garantire il requisito. Controllo finale segmento-per-segmento lato Kotlin, preferendo il vettore operativo quando disponibile.
+Opzione: tutte le tratte devono essere operate dalla stessa compagnia. `include_airlines` è solo un pre-filtro; controllo definitivo segmento-per-segmento lato Kotlin, preferendo il vettore operativo quando disponibile.
 
 ## 2.9 Durata massima dello scalo
 
-Filtro nativo SerpApi:
-
-`layover_duration=MIN,MAX`
-
-Unità: minuti. Eseguire anche un controllo finale client-side su `layovers[].duration`.
+Filtro nativo SerpApi: `layover_duration=MIN,MAX`, in minuti. Eseguire anche controllo client-side su `layovers[].duration`.
 
 ## 2.10 Dettaglio scalo
 
-Mostrare almeno:
-
-- aeroporto;
-- città quando disponibile;
-- paese;
-- durata;
-- overnight quando disponibile.
+Mostrare almeno aeroporto, città quando disponibile, paese, durata e overnight quando disponibile.
 
 ## 2.11 Maps per scali >8h
 
-Per scali superiori a 8 ore mostrare un pulsante che apre Google Maps/browser tramite Android Intent. Niente Google Maps SDK nella prima versione.
+Per scali oltre 8 ore mostrare pulsante verso Google Maps/browser via Android Intent. Niente Google Maps SDK nella prima versione.
 
 ---
 
@@ -123,7 +102,7 @@ Quota free verificata:
 - 50/ora;
 - nessuna carta richiesta.
 
-Usi principali:
+Usi:
 
 - Google Flights;
 - Google Travel Explore;
@@ -149,26 +128,26 @@ Non è un secondo provider voli completo. Ruolo: `date discovery accelerator`.
 
 Endpoint: `google_flights_calendar`.
 
-Usarlo soprattutto per:
+Usare soprattutto per:
 
 - N notti + ±X giorni;
 - range ampi con destinazione fissa;
 - casi in cui SerpApi richiederebbe circa >=10 chiamate.
 
-Parametri importanti:
+Parametri principali:
 
 - `outbound_date_start`;
 - `outbound_date_end`;
 - `return_date_start`;
 - `return_date_end`.
 
-Limite noto: circa 200 combinazioni andata/ritorno per richiesta; dividere range grandi in blocchi.
+Limite noto: circa 200 combinazioni andata/ritorno per richiesta; spezzare range grandi in blocchi.
 
-I 100 crediti free non vengono considerati ricorrenti mensilmente perché il rinnovo non è confermato. L'app deve continuare a funzionare quando finiscono.
+I 100 crediti gratuiti non vengono considerati ricorrenti mensilmente perché il rinnovo non è confermato. L'app deve continuare a funzionare quando terminano.
 
 ## 3.3 `price_insights`
 
-Non usare per ±X giorni. È un'aggregazione statistica sulla stessa rotta/date, non un calendario giorno-per-giorno.
+Non usare per ±X giorni: descrive statisticamente la stessa rotta/date, non un calendario giorno-per-giorno.
 
 ---
 
@@ -180,7 +159,7 @@ Pattern obbligatorio:
 
 ## Discovery
 
-Trovare candidati promettenti con poche query usando uno o più di:
+Trovare candidati con poche query usando, a seconda del caso:
 
 - SerpApi Travel Explore;
 - SearchAPI.io Calendar;
@@ -191,19 +170,19 @@ Trovare candidati promettenti con poche query usando uno o più di:
 
 ## Verifica
 
-Verificare solo 1–3 candidati migliori con SerpApi Google Flights applicando date precise e filtri disponibili.
+Verificare solo 1–3 candidati migliori con SerpApi Google Flights, applicando date precise e filtri disponibili.
 
 ## Dettaglio
 
-Solo quando serve recuperare/analizzare:
+Solo on-demand analizzare/recuperare:
 
-- ritorno associato / eventuale `departure_token`;
+- eventuale `departure_token` e ritorno associato;
 - segmenti;
 - scali;
 - codeshare / operating carrier;
-- paese degli scali;
+- paese scali;
 - stessa compagnia;
-- popup scali;
+- popup scalo;
 - Maps.
 
 Non scaricare automaticamente il dettaglio completo di decine di risultati.
@@ -225,8 +204,6 @@ Non scaricare automaticamente il dettaglio completo di decine di risultati.
 
 ## DatePriceCandidate
 
-Campi concettuali:
-
 - `outboundDate`;
 - `returnDate`;
 - `indicativePrice`;
@@ -236,8 +213,6 @@ Campi concettuali:
 Usato nella fase Discovery.
 
 ## FlightItinerary
-
-Campi principali:
 
 - prezzo;
 - valuta;
@@ -268,22 +243,18 @@ Campi principali:
 - durata minuti;
 - overnight.
 
-La UI deve dipendere dai modelli interni, non dai DTO JSON specifici dei provider.
+La UI deve dipendere dai modelli interni, non direttamente dai DTO JSON dei provider.
 
 ---
 
 # 7. Database aeroporti locale
 
-Prevedere una fonte locale:
-
-`IATA -> aeroporto -> città -> ISO country`
-
-Usi:
+Prevedere fonte locale `IATA -> aeroporto -> città -> ISO country` per:
 
 - mostrare paese dello scalo;
 - filtrare paesi esclusi;
 - selezione aeroporti;
-- supportare ricerche geografiche;
+- ricerca geografica;
 - popup scalo.
 
 Nessuna query API per questo lookup.
@@ -300,18 +271,16 @@ Nessuna query API per questo lookup.
 - <=5: privilegiare cache, Explore, query singole ed euristiche.
 - Mai 30–40 chiamate automatiche con un singolo tap.
 
-Mostrare le query residue usando SerpApi Account API quando disponibile.
+Mostrare le query residue via SerpApi Account API quando disponibile.
 
 ## SearchAPI.io
 
-Usare Calendar soprattutto quando sostituisce circa >=10 query SerpApi.
-
-Quando i crediti finiscono:
+Usare Calendar soprattutto quando sostituisce circa >=10 query SerpApi. Quando i crediti finiscono:
 
 - range piccolo -> SerpApi esaustivo;
 - range grande -> campionamento 5–7 date;
-- eventuale ricerca completa costosa solo su scelta esplicita;
-- non disabilitare la funzione date flessibili.
+- ricerca completa costosa solo su scelta esplicita;
+- non disabilitare date flessibili.
 
 ---
 
@@ -319,20 +288,13 @@ Quando i crediti finiscono:
 
 Tecnologia prevista: Room.
 
-Chiave concettuale:
-
-- origine/i;
-- destinazione/i;
-- date;
-- passeggeri;
-- filtri;
-- provider.
-
-Salvare risultato + timestamp e riusare ricerche identiche recenti.
+Chiave concettuale: origine/i + destinazione/i + date + passeggeri + filtri + provider. Salvare risultato e timestamp e riusare ricerche identiche recenti.
 
 ---
 
 # 10. Stack tecnologico
+
+App:
 
 - Kotlin nativo;
 - Jetpack Compose;
@@ -348,7 +310,7 @@ Salvare risultato + timestamp e riusare ricerche identiche recenti.
 
 Sviluppo:
 
-- GitHub privata;
+- repository privata GitHub;
 - GitHub Codespaces opzionale;
 - github.dev per piccoli edit;
 - niente Android Studio locale;
@@ -380,13 +342,13 @@ Cambiare questi pin solo deliberatamente.
 
 # 12. Identità del progetto
 
-- Nome app visibile: **VolaFlex**.
+- Nome visibile: **VolaFlex**.
 - Repository: **archimede-projects/flexi-flights**.
 - `rootProject.name`: **VolaFlex**.
 - namespace: **com.archimedeprojects.volaflex**.
 - applicationId: **com.archimedeprojects.volaflex**.
 
-Il proprietario GitHub contiene un trattino (`archimede-projects`), non valido in un package Java/Kotlin; per questo è normalizzato in `archimedeprojects`.
+`archimede-projects` contiene un trattino non valido in un package Java/Kotlin; è quindi normalizzato in `archimedeprojects`.
 
 ---
 
@@ -396,31 +358,29 @@ Flusso:
 
 `codice GitHub -> push main -> GitHub Actions -> Gradle -> APK debug -> GitHub Release -> telefono Android`
 
-Gli APK NON devono essere pubblicati come Actions artifacts temporanei.
+Gli APK NON vengono usati come Actions artifacts temporanei.
 
-Durante lo sviluppo usare una sola Release sovrascrivibile:
+Durante sviluppo:
 
 - tag: `dev-latest`;
-- title: `VolaFlex - Development latest`;
+- Release title: `VolaFlex - Development latest`;
 - asset: `VolaFlex-dev.apk`.
 
-Ogni push su `main` sposta `dev-latest` e sostituisce l'APK.
+Ogni push di codice/config su `main` sposta `dev-latest` e sostituisce l'APK. Release permanenti solo per tag `v*` come `v0.1.0`.
 
-Release permanenti solo per tag versionati `v*` (es. `v0.1.0`).
+`PROJECT_SPEC.md` e `SESSION_HANDOFF.md` sono esclusi dal trigger `push` tramite `paths-ignore`, così gli aggiornamenti della memoria non consumano build/minuti CI né rigenerano inutilmente l'APK.
 
-Non attivare Immutable Releases mentre esiste il flusso `dev-latest` sovrascrivibile.
+Non attivare Immutable Releases mentre usiamo `dev-latest` sovrascrivibile.
 
 Workflow iniziale senza Gradle Wrapper: `gradle/actions/setup-gradle` installa Gradle 9.5.0. Il Wrapper potrà essere aggiunto più avanti.
 
-Firma iniziale: debug standard. Dopo la validazione della pipeline aggiungere una firma debug stabile per consentire aggiornamenti senza disinstallazione.
+Firma iniziale: debug standard. Dopo la validazione completa della Fase 0 introdurre firma debug stabile per permettere aggiornamenti senza disinstallazione.
 
 ---
 
 # 14. Credenziali API
 
-Non committare chiavi API.
-
-Strategia prevista nella v1: schermata Impostazioni dove l'utente inserisce SerpApi/SearchAPI.io key sul telefono; salvataggio locale tramite DataStore.
+Non committare chiavi API. Nella v1 prevedere schermata Impostazioni dove l'utente inserisce SerpApi/SearchAPI.io key sul telefono; salvataggio locale tramite DataStore.
 
 ---
 
@@ -428,7 +388,7 @@ Strategia prevista nella v1: schermata Impostazioni dove l'utente inserisce Serp
 
 ## Kotlin + Compose, non Flutter
 
-Solo Android; meno stack da imparare; migliore allineamento con documentazione e API Android native.
+Solo Android, meno stack da imparare, miglior allineamento con documentazione e API native Android.
 
 ## SerpApi come primario
 
@@ -436,15 +396,15 @@ Free tier senza carta, 250 query/mese, Google Flights/Explore e dati compatibili
 
 ## SearchAPI Calendar come acceleratore, non backup completo
 
-Riduce drasticamente le query per range/date flessibili senza obbligare a mantenere due parser completi di itinerari. I suoi crediti potrebbero essere one-time.
+Riduce drasticamente le query per date/range flessibili senza mantenere due parser completi. I crediti SearchAPI potrebbero essere one-time.
 
 ## Discovery -> Verifica -> Dettaglio
 
-Necessario per rendere sostenibile la quota SerpApi ed evitare brute force.
+Rende sostenibile la quota e evita brute force.
 
 ## GitHub-only
 
-Decisione esplicita del proprietario: niente Android Studio locale. Accettati cicli di feedback più lenti e assenza di emulator/debugger/Compose Preview locali.
+Decisione esplicita: niente Android Studio locale. Accettati feedback più lenti e assenza di emulator/debugger/Compose Preview locali.
 
 ## GitHub Release, non Actions artifact
 
@@ -452,7 +412,11 @@ APK persistente e facilmente scaricabile dal telefono; niente dipendenza dalla r
 
 ## Singola Release `dev-latest`
 
-Evita accumulo di decine di release durante lo sviluppo.
+Evita decine di release inutili durante lo sviluppo.
+
+## `paths-ignore` per i file di memoria
+
+Evita che l'obbligo di aggiornare `PROJECT_SPEC.md` e `SESSION_HANDOFF.md` generi una build Android a ogni aggiornamento documentale.
 
 ## Database IATA locale
 
@@ -464,16 +428,18 @@ Necessario per paese degli scali ed esclusione di un paese senza consumare API.
 
 ## Fase 0 — Pipeline infrastrutturale
 
-Criteri di completamento:
+Criteri:
 
-1. progetto Compose minimo presente in repo;
-2. push su `main`;
-3. workflow `Android Build` verde;
-4. Release `dev-latest` creata/aggiornata;
-5. asset `VolaFlex-dev.apk` disponibile;
-6. APK installato sul telefono;
-7. schermata `VolaFlex - Build OK` visibile;
-8. versione build corretta visualizzata.
+1. progetto Compose minimo in repo — **COMPLETATO**;
+2. workflow `Android Build` su `main` — **COMPLETATO**;
+3. build GitHub Actions verde — **COMPLETATO**;
+4. Release `dev-latest` creata/aggiornata — **COMPLETATO**;
+5. asset `VolaFlex-dev.apk` disponibile — **COMPLETATO**;
+6. APK installato sul telefono — **DA CONFERMARE**;
+7. schermata `VolaFlex - Build OK` visibile — **DA CONFERMARE**;
+8. versione build corretta visualizzata — **DA CONFERMARE**.
+
+La Fase 0 non è formalmente chiusa finché i punti 6–8 non vengono confermati sul telefono.
 
 ## v1 — Fondamenta (7–10 settimane stimate GitHub-only)
 
@@ -517,27 +483,27 @@ Criteri di completamento:
 - Maps;
 - robustezza/fallback.
 
-Stima complessiva attuale: 21–30 settimane part-time.
+Stima complessiva: 21–30 settimane part-time.
 
 ---
 
 # 17. Rischi noti e accettati
 
-- SerpApi/SearchAPI.io sono fonti non ufficiali basate su Google Flights e possono avere regressioni/cambi JSON/downtime.
-- Ricerca non sempre matematicamente esaustiva: su range grandi è accettato il campionamento.
+- SerpApi/SearchAPI.io non sono fonti ufficiali Google Flights e possono subire regressioni/cambi JSON/downtime.
+- Ricerca non sempre matematicamente esaustiva: campionamento accettato su range grandi.
 - Quota SerpApi limitata: mitigata con cache, Explore, Calendar, multi-airport e discovery.
 - Prezzi Calendar indicativi: verifica finale con SerpApi.
-- Crediti SearchAPI.io potenzialmente one-time: non deve essere un single point of failure.
-- Workflow senza Android Studio: debug e feedback più lenti; mitigazione con CI, Codespaces, diagnostica e telefono reale.
-- Firma debug iniziale non stabile: da correggere dopo la validazione Fase 0.
+- Crediti SearchAPI.io potenzialmente one-time: non deve essere single point of failure.
+- Workflow senza Android Studio: debug più lento; mitigazione con CI, Codespaces, diagnostica e telefono reale.
+- Firma debug iniziale non stabile: da correggere dopo chiusura Fase 0.
 
 ---
 
 # 18. Stato di avanzamento reale
 
-## Implementato nella repository
+## Implementato e verificato nella repository
 
-- repository privata `archimede-projects/flexi-flights` inizializzata;
+- repository privata `archimede-projects/flexi-flights`;
 - `.gitignore`;
 - root `build.gradle.kts`;
 - `settings.gradle.kts` con `rootProject.name = "VolaFlex"`;
@@ -545,15 +511,21 @@ Stima complessiva attuale: 21–30 settimane part-time.
 - modulo `app/build.gradle.kts`;
 - namespace/applicationId `com.archimedeprojects.volaflex`;
 - `AndroidManifest.xml` con label `VolaFlex`;
-- `MainActivity.kt` Compose con testo `VolaFlex - Build OK` e versione app.
+- `MainActivity.kt` Compose con testo `VolaFlex - Build OK` e versione app;
+- `.github/workflows/android-build.yml`;
+- Android SDK 36 installato in CI con `android-actions/setup-android@v4`;
+- build Gradle reale completata con successo;
+- Release `VolaFlex - Development latest` / tag `dev-latest` creata e aggiornata;
+- asset `VolaFlex-dev.apk` pubblicato correttamente;
+- `PROJECT_SPEC.md` e `SESSION_HANDOFF.md` esclusi dalle build docs-only tramite `paths-ignore`.
 
-## Ancora da verificare/completare nella Fase 0
+## Da confermare manualmente
 
-- workflow GitHub Actions da aggiungere/validare;
-- prima build verde;
-- Release `VolaFlex - Development latest`;
-- asset `VolaFlex-dev.apk`;
-- installazione APK sul telefono;
-- conferma schermata e versione sul dispositivo.
+- download APK sul telefono;
+- installazione APK;
+- schermata `VolaFlex - Build OK`;
+- versione corretta visualizzata.
 
-Non segnare questi elementi come completati finché non sono realmente verificati.
+## Prossimo milestone
+
+Chiudere Fase 0 con test sul telefono. Subito dopo: introdurre firma debug stabile, quindi iniziare v1 con impostazioni API key e prima chiamata SerpApi a date fisse.
