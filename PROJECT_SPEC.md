@@ -159,6 +159,22 @@ Le query identiche possono essere servite dalla cache SerpApi senza consumo di q
 
 Usare la SerpApi Account API per mostrare il saldo reale della quota quando verrà implementata la parte rete. La Account API non consuma la quota normale.
 
+### Nota: chiave SerpApi condivisa con altro progetto
+
+La API key SerpApi usata da VolaFlex **non è dedicata all'app**: appartiene allo stesso account gratuito già usato da un altro progetto personale.
+
+Conseguenze architetturali:
+
+- la quota mensile SerpApi è condivisa fra VolaFlex e l'altro progetto;
+- il saldo può diminuire anche mentre VolaFlex non viene usata;
+- un contatore locale interno a VolaFlex non è affidabile come fonte di verità;
+- il valore autorevole è sempre quello restituito live dalla SerpApi Account API;
+- prima di ogni ricerca stimata costosa (>5 query SerpApi), VolaFlex deve interrogare nuovamente l'Account API anche se ha già mostrato un saldo pochi minuti prima;
+- dopo una ricerca costosa, aggiornare nuovamente il saldo visualizzato quando pratico;
+- se il controllo live della Account API fallisce, VolaFlex non deve avviare automaticamente una ricerca >5 query: deve passare a una strategia <=5 query oppure chiedere un override esplicito all'utente.
+
+Questa decisione è intenzionale: non creare un secondo account SerpApi solo per ottenere una quota separata se ciò richiede fornire un numero di telefono.
+
 ## 3.2 SearchAPI.io Calendar — acceleratore mirato
 
 Non è un secondo provider voli completo.
@@ -325,13 +341,19 @@ Nessuna query API per questo lookup.
 
 ## SerpApi
 
+Le soglie restano valide anche con chiave condivisa, perché devono essere applicate al **saldo live dell'account**, non a un contatore locale stimato.
+
 - >50 residue: funzionamento normale.
 - <=50: cache/modalità risparmio più aggressive.
 - <=20: conferma prima di una ricerca stimata >5 query.
 - <=5: privilegiare cache, Explore, query singole ed euristiche.
 - Mai 30–40 chiamate automatiche con un singolo tap.
 
-Mostrare le query residue via SerpApi Account API quando disponibile.
+Regola aggiuntiva per la chiave condivisa:
+
+- prima di ogni ricerca stimata >5 query, refresh obbligatorio tramite SerpApi Account API;
+- il saldo mostrato in UI può essere informativo, ma se non è appena stato aggiornato non va usato per autorizzare una ricerca costosa;
+- se l'Account API non è raggiungibile, non avviare automaticamente >5 query: usare una modalità <=5 query oppure richiedere conferma/override esplicito.
 
 ## SearchAPI.io
 
@@ -724,7 +746,8 @@ Stima complessiva: 21–30 settimane part-time.
 
 - SerpApi/SearchAPI.io non sono fonti ufficiali Google Flights e possono subire regressioni/cambi JSON/downtime.
 - Ricerca non sempre matematicamente esaustiva: campionamento accettato su range grandi.
-- Quota SerpApi limitata: mitigata con cache, Explore, Calendar, multi-airport e discovery.
+- Quota SerpApi limitata e condivisa con un altro progetto personale: mitigata con Account API live, cache, Explore, Calendar, multi-airport e discovery.
+- Il saldo SerpApi può diminuire per consumi esterni a VolaFlex; non considerare autorevole un contatore locale o un saldo non appena aggiornato.
 - Prezzi Calendar indicativi: verifica finale con SerpApi.
 - Crediti SearchAPI.io potenzialmente one-time: non deve essere single point of failure.
 - Workflow senza Android Studio: debug più lento; mitigazione con CI, Codespaces, diagnostica e telefono reale.
