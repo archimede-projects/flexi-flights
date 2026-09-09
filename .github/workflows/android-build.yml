@@ -9,6 +9,7 @@ on:
     paths-ignore:
       - "PROJECT_SPEC.md"
       - "SESSION_HANDOFF.md"
+      - ".github/workflows/android-build.yml"
   workflow_dispatch:
 
 permissions:
