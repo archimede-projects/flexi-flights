@@ -35,6 +35,7 @@ import kotlinx.coroutines.launch
 @Composable
 fun SettingsScreen(
     apiKeyStore: ApiKeyStore,
+    onOpenDiagnostics: () -> Unit,
     onBackHome: () -> Unit
 ) {
     val status by apiKeyStore.status.collectAsState(initial = ApiKeyStatus())
@@ -163,10 +164,19 @@ fun SettingsScreen(
         }
 
         OutlinedButton(
+            onClick = onOpenDiagnostics,
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(top = 28.dp)
+        ) {
+            Text("Diagnostica")
+        }
+
+        OutlinedButton(
             onClick = onBackHome,
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(top = 24.dp)
+                .padding(top = 12.dp)
         ) {
             Text("Torna alla Home")
         }
