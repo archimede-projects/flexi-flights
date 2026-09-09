@@ -31,6 +31,21 @@ interface SerpApiService {
         @Query("gl") country: String,
         @Query("api_key") apiKey: String
     ): Response<GoogleFlightsResponseDto>
+
+    @GET("search")
+    suspend fun searchTravelExplore(
+        @Query("engine") engine: String,
+        @Query("departure_id") departureId: String,
+        @Query("arrival_id") arrivalId: String,
+        @Query("month") month: Int,
+        @Query("travel_duration") travelDuration: Int,
+        @Query("travel_class") travelClass: Int,
+        @Query("travel_mode") travelMode: Int,
+        @Query("currency") currency: String,
+        @Query("hl") language: String,
+        @Query("gl") country: String,
+        @Query("api_key") apiKey: String
+    ): Response<TravelExploreResponseDto>
 }
 
 object SerpApiNetwork {
