@@ -16,6 +16,7 @@ import androidx.compose.material3.DatePicker
 import androidx.compose.material3.DatePickerDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -35,18 +36,22 @@ import com.archimedeprojects.volaflex.data.ApiKeyStore
 import com.archimedeprojects.volaflex.data.FlightSearchOutcome
 import com.archimedeprojects.volaflex.data.FlightSearchRepository
 import com.archimedeprojects.volaflex.data.SimpleFlightResult
+import com.archimedeprojects.volaflex.data.local.AirportDirectory
 import java.time.Instant
 import java.time.LocalDate
+import java.time.ZoneId
 import java.time.ZoneOffset
 import java.time.format.DateTimeFormatter
 import java.util.Locale
 import kotlinx.coroutines.launch
 
 private val displayDateFormatter: DateTimeFormatter = DateTimeFormatter.ofPattern("dd/MM/yyyy")
+private val displayTimeFormatter: DateTimeFormatter = DateTimeFormatter.ofPattern("HH:mm")
 
 private sealed interface SearchUiState {
     data object Idle : SearchUiState
     data object Loading : SearchUiState
+    data class IataWarning(val text: String) : SearchUiState
     data class Success(val result: SimpleFlightResult) : SearchUiState
     data class Message(
         val text: String,
@@ -68,6 +73,45 @@ fun SearchScreen(
     var uiState by remember { mutableStateOf<SearchUiState>(SearchUiState.Idle) }
     val scope = rememberCoroutineScope()
 
+    val executeSearch: (Boolean) -> Unit = { forceRefresh ->
+        val departure = departureInput.trim().uppercase(Locale.ROOT)
+        val arrival = arrivalInput.trim().uppercase(Locale.ROOT)
+
+        scope.launch {
+            val apiKey = runCatching {
+                apiKeyStore.getSerpApiKey()
+            }.getOrNull()
+
+            if (apiKey.isNullOrBlank()) {
+                uiState = SearchUiState.Message(
+                    text = "SerpApi non è configurata. Salva prima la API key nelle Impostazioni.",
+                    showSettingsButton = true
+                )
+                return@launch
+            }
+
+            uiState = SearchUiState.Loading
+
+            uiState = when (
+                val outcome = repository.searchRoundTrip(
+                    apiKey = apiKey,
+                    departureId = departure,
+                    arrivalId = arrival,
+                    outboundDate = outboundDate.toString(),
+                    returnDate = returnDate.toString(),
+                    forceRefresh = forceRefresh
+                )
+            ) {
+                is FlightSearchOutcome.Success -> SearchUiState.Success(outcome.result)
+                is FlightSearchOutcome.Blocked -> SearchUiState.Message(outcome.message)
+                is FlightSearchOutcome.Error -> SearchUiState.Message(
+                    text = outcome.message,
+                    showSettingsButton = outcome.suggestSettings
+                )
+            }
+        }
+    }
+
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -81,14 +125,18 @@ fun SearchScreen(
         )
 
         Text(
-            text = "Prima versione reale: una rotta, date fisse, classe Economy. " +
-                "Per ora usa codici IATA come FCO e MAD.",
+            text = "Una rotta, date fisse, classe Economy. Usa codici IATA come FCO e MAD.",
             style = MaterialTheme.typography.bodyMedium
         )
 
         OutlinedTextField(
             value = departureInput,
-            onValueChange = { departureInput = it },
+            onValueChange = {
+                departureInput = it
+                if (uiState is SearchUiState.IataWarning) {
+                    uiState = SearchUiState.Idle
+                }
+            },
             modifier = Modifier.fillMaxWidth(),
             label = { Text("Partenza (es. FCO)") },
             singleLine = true,
@@ -100,7 +148,12 @@ fun SearchScreen(
 
         OutlinedTextField(
             value = arrivalInput,
-            onValueChange = { arrivalInput = it },
+            onValueChange = {
+                arrivalInput = it
+                if (uiState is SearchUiState.IataWarning) {
+                    uiState = SearchUiState.Idle
+                }
+            },
             modifier = Modifier.fillMaxWidth(),
             label = { Text("Arrivo (es. MAD)") },
             singleLine = true,
@@ -134,14 +187,10 @@ fun SearchScreen(
 
                 when {
                     departure.isBlank() || arrival.isBlank() -> {
-                        uiState = SearchUiState.Message(
-                            "Inserisci sia la partenza sia l'arrivo."
-                        )
+                        uiState = SearchUiState.Message("Inserisci sia la partenza sia l'arrivo.")
                     }
                     departure == arrival -> {
-                        uiState = SearchUiState.Message(
-                            "Partenza e arrivo devono essere diversi."
-                        )
+                        uiState = SearchUiState.Message("Partenza e arrivo devono essere diversi.")
                     }
                     returnDate.isBefore(outboundDate) -> {
                         uiState = SearchUiState.Message(
@@ -149,43 +198,18 @@ fun SearchScreen(
                         )
                     }
                     else -> {
-                        scope.launch {
-                            val apiKey = runCatching {
-                                apiKeyStore.getSerpApiKey()
-                            }.getOrNull()
+                        val unknownCodes = listOf(departure, arrival)
+                            .distinct()
+                            .filterNot(AirportDirectory::isKnown)
 
-                            if (apiKey.isNullOrBlank()) {
-                                uiState = SearchUiState.Message(
-                                    text = "SerpApi non è configurata. Salva prima la API key nelle Impostazioni.",
-                                    showSettingsButton = true
-                                )
-                                return@launch
-                            }
-
-                            uiState = SearchUiState.Loading
-
-                            uiState = when (
-                                val outcome = repository.searchRoundTrip(
-                                    apiKey = apiKey,
-                                    departureId = departure,
-                                    arrivalId = arrival,
-                                    outboundDate = outboundDate.toString(),
-                                    returnDate = returnDate.toString()
-                                )
-                            ) {
-                                is FlightSearchOutcome.Success -> {
-                                    SearchUiState.Success(outcome.result)
-                                }
-                                is FlightSearchOutcome.Blocked -> {
-                                    SearchUiState.Message(outcome.message)
-                                }
-                                is FlightSearchOutcome.Error -> {
-                                    SearchUiState.Message(
-                                        text = outcome.message,
-                                        showSettingsButton = outcome.suggestSettings
-                                    )
-                                }
-                            }
+                        if (unknownCodes.isNotEmpty()) {
+                            val codes = unknownCodes.joinToString("', '")
+                            uiState = SearchUiState.IataWarning(
+                                "Codice '$codes' non riconosciuto nella lista locale — " +
+                                    "controlla che sia corretto prima di continuare."
+                            )
+                        } else {
+                            executeSearch(false)
                         }
                     }
                 }
@@ -206,7 +230,38 @@ fun SearchScreen(
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     CircularProgressIndicator()
-                    Text("Controllo quota SerpApi e ricerca in corso…")
+                    Text("Controllo cache/quota e ricerca in corso…")
+                }
+            }
+
+            is SearchUiState.IataWarning -> {
+                Card(modifier = Modifier.fillMaxWidth()) {
+                    Column(
+                        modifier = Modifier.padding(16.dp),
+                        verticalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        Text(
+                            text = "Controllo codice aeroporto",
+                            style = MaterialTheme.typography.titleMedium
+                        )
+                        Text(state.text)
+                        Row(
+                            horizontalArrangement = Arrangement.spacedBy(12.dp)
+                        ) {
+                            OutlinedButton(
+                                onClick = { uiState = SearchUiState.Idle },
+                                modifier = Modifier.weight(1f)
+                            ) {
+                                Text("Correggi")
+                            }
+                            Button(
+                                onClick = { executeSearch(false) },
+                                modifier = Modifier.weight(1f)
+                            ) {
+                                Text("Cerca comunque")
+                            }
+                        }
+                    }
                 }
             }
 
@@ -227,7 +282,10 @@ fun SearchScreen(
             }
 
             is SearchUiState.Success -> {
-                FlightResultCard(state.result)
+                FlightResultCard(
+                    result = state.result,
+                    onForceRefresh = { executeSearch(true) }
+                )
             }
         }
 
@@ -241,7 +299,10 @@ fun SearchScreen(
 }
 
 @Composable
-private fun FlightResultCard(result: SimpleFlightResult) {
+private fun FlightResultCard(
+    result: SimpleFlightResult,
+    onForceRefresh: () -> Unit
+) {
     Card(modifier = Modifier.fillMaxWidth()) {
         Column(
             modifier = Modifier.padding(16.dp),
@@ -251,12 +312,38 @@ private fun FlightResultCard(result: SimpleFlightResult) {
                 text = "Primo risultato trovato",
                 style = MaterialTheme.typography.titleMedium
             )
+
+            if (result.fromCache && result.cachedAtEpochMillis != null) {
+                val cacheTime = Instant.ofEpochMilli(result.cachedAtEpochMillis)
+                    .atZone(ZoneId.systemDefault())
+                    .format(displayTimeFormatter)
+                Text(
+                    text = "Risultato da cache — aggiornato alle $cacheTime",
+                    style = MaterialTheme.typography.labelLarge
+                )
+            }
+
             Text("Prezzo round-trip: ${result.price} ${result.currency}")
             Text("Compagnia (andata): ${result.airlines}")
             Text("Partenza (andata): ${result.departureTime}")
             Text("Arrivo (andata): ${result.arrivalTime}")
             Text("Scali (andata): ${result.stops}")
-            Text("Quota verificata prima della ricerca: ${result.searchesLeftBeforeSearch} rimaste")
+
+            if (result.fromCache) {
+                Text(
+                    "Quota registrata quando il risultato è stato ottenuto: " +
+                        "${result.searchesLeftBeforeSearch} rimaste"
+                )
+                OutlinedButton(
+                    onClick = onForceRefresh,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text("Aggiorna comunque")
+                }
+            } else {
+                Text("Quota verificata prima della ricerca: ${result.searchesLeftBeforeSearch} rimaste")
+            }
+
             Text(
                 text = "I dettagli del ritorno richiedono una seconda query SerpApi e non vengono ancora richiesti.",
                 style = MaterialTheme.typography.bodySmall
