@@ -1,16 +1,20 @@
 # SESSION_HANDOFF
 
-**Fase attuale:** v1 — Fondamenta. Fase 0 e firma persistente chiuse; Impostazioni API key completate e testate sul telefono. Step v1.3 “prima ricerca reale SerpApi a date fisse” implementato e validato in CI; manca il primo test reale della chiamata dal telefono.
+**Fase attuale:** v1 — Fondamenta. Fase 0, firma persistente, Impostazioni API key e prima ricerca reale SerpApi sono confermate nel mondo reale. Gli ultimi tre elementi v1 (IATA guard, Room cache 4h, Diagnostica) sono implementati e CI verde; manca solo il test sul telefono.
 
-**Ultimo step completato con successo:** GitHub Actions run #13 ha compilato, firmato e pubblicato `VolaFlex-dev.apk` versione `0.1.0-dev.13`. `assembleRelease`, `zipalign` e `apksigner verify` sono riusciti. Fingerprint SHA-256 invariato: `a1f432f512e3d1867ee4b4535fb06a83fae5413ee700113b34e8b926a2767df3`. Implementati permesso INTERNET, Retrofit/OkHttp/Kotlin Serialization, route Ricerca, input IATA testuale, date picker, Account API quota live, blocco con saldo <=5, una chiamata `google_flights` round-trip, loading, parsing del primo risultato ed error handling leggibile.
+**Ultimo successo reale:** build `0.1.0-dev.13`, ricerca `FCO → MAD`, 16–19 ottobre 2026: Ryanair 104 EUR round-trip, 0 scali andata, quota live 131/250 prima della ricerca. Nessun crash; firma invariata.
 
-**Decisione quota:** la chiave SerpApi è condivisa con un altro progetto. La Account API live è la fonte di verità. In questo primo step di ricerca viene controllata prima di OGNI query voli e la ricerca viene bloccata se il saldo è <=5 o non verificabile.
+**Ultimo successo CI:** GitHub Actions run #15 = SUCCESS, build `0.1.0-dev.15`. Room 2.8.4 + KSP 2.3.11 compilano correttamente; `assembleRelease`, firma e Release riusciti. Fingerprint invariato: `a1f432f512e3d1867ee4b4535fb06a83fae5413ee700113b34e8b926a2767df3`.
 
-**Prossimo step immediato:** installare `0.1.0-dev.13` sopra la versione corrente senza disinstallare e testare `FCO → MAD` con due date future. Atteso: quota live >5, una sola query Google Flights, card con prezzo round-trip più compagnia/orari/scali dell'andata. Se compare un errore, riportare esattamente il messaggio mostrato dalla UI.
+**Implementato ora:** directory locale strutturata di circa 180–200 aeroporti (`IATA/nome/città/ISO country`); warning per IATA sconosciuto con `Correggi` / `Cerca comunque`; Room cache chiave `origine|destinazione|andata|ritorno`, TTL 4h; cache hit salta Account API e Google Flights; `Aggiorna comunque` forza refresh; Diagnostica persistente ultimi 20 eventi (`SERPAPI_ACCOUNT`, `GOOGLE_FLIGHTS`, `CACHE`, `QUOTA_GUARD`) con timestamp/status HTTP/messaggio e pulsante `Copia diagnostica`. Nessuna API key viene registrata.
 
-**Nota round-trip:** il dettaglio del ritorno richiede una seconda chiamata con `departure_token`; non viene ancora eseguita per mantenere questo test a una sola query voli.
+**Prossimo step immediato:** installare `0.1.0-dev.15` sopra la versione corrente e validare: (1) `FC0 → MAD` mostra warning senza query; premere `Correggi`; (2) fare `FCO → MAD` con date fisse una prima volta; (3) ripetere identico entro 4h e verificare `Risultato da cache — aggiornato alle HH:MM`; (4) Impostazioni → Diagnostica, verificare gli eventi e `Copia diagnostica`.
 
-**Problemi aperti:** nessun problema CI o firma. Il comportamento reale SerpApi dal telefono non è ancora stato verificato. Non sono ancora implementati Room/cache, filtri avanzati, weekend/date flessibili o multi-aeroporto.
+**Consumo test previsto:** warning `FC0` = 0 query; prima ricerca valida = 1 Google Flights + Account API gratuita; seconda identica da cache = 0 query. Non premere `Aggiorna comunque` salvo test esplicito, perché aggiunge una nuova query voli.
+
+**Nota CI:** run #14 è stato cancellato automaticamente da `cancel-in-progress` quando è partito il run #15 sul commit funzionale; non era un errore di codice.
+
+**Problemi aperti:** nessun problema noto di build/firma. Da verificare solo comportamento reale di IATA warning, cache e clipboard diagnostica sul telefono. Il dettaglio ritorno via `departure_token`, filtri avanzati, weekend/date flessibili e multi-aeroporto restano successivi.
 
 **Regola:** dopo ogni decisione, modifica o step completato aggiornare sia `PROJECT_SPEC.md` sia questo file.
 
