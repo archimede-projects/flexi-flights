@@ -18,249 +18,296 @@ VolaFlex è un'app Android personale per trovare voli economici con forte suppor
 
 Vincoli permanenti:
 
-- uso personale e APK sideload; niente Play Store per ora;
-- zero costi e nessuna carta di credito/debito;
+- uso personale e distribuzione APK via sideload;
+- niente Play Store per ora;
+- **zero costi**;
+- **nessuna carta di credito/debito**;
 - niente backend/server a pagamento;
-- sviluppo GitHub-only, repository privata;
+- sviluppo GitHub-only;
+- repository GitHub privata;
 - nessun Android Studio locale;
-- GitHub Actions per CI/build e GitHub Releases per APK;
-- Codespaces opzionale;
+- GitHub Actions per CI/build;
+- GitHub Releases per distribuire l'APK;
+- GitHub Codespaces opzionale;
 - test runtime/UI su telefono Android reale;
-- proprietario principiante assoluto.
+- proprietario del progetto principiante assoluto.
 
 ---
 
 # 2. Requisiti funzionali originali
 
-1. Weekend flessibili: venerdì sera **oppure** sabato mattina → domenica sera **oppure** lunedì.
-2. N notti: origine + destinazione + numero esatto notti, senza date fisse.
+1. Weekend flessibili: partenza venerdì sera oppure sabato mattina; ritorno domenica sera oppure lunedì.
+2. N notti: origine + destinazione + numero esatto di notti, data target con ±X giorni; trovare il periodo più economico.
 3. Data target ±X giorni.
-4. Range ampio di date.
+4. Range ampi di date evitando brute force quando esistono metodi più efficienti.
 5. Multi-origine fino a 3 alternative.
-6. Destinazione singola, fino a 3 alternative, Ovunque o intero paese.
+6. Destinazione singola, fino a 3 alternative, Ovunque oppure intero paese.
 7. Esclusione paese di scalo.
 8. Stessa compagnia operativa su tutti i segmenti quando richiesto.
 9. Durata massima scalo.
-10. Dettaglio scalo: aeroporto/città/paese/durata/overnight.
-11. Scali >8h: Maps tramite Android Intent, senza Maps SDK.
+10. Dettaglio scalo: aeroporto, città, paese, durata, overnight.
+11. Scali >8h: pulsante Maps via Android Intent; niente Maps SDK.
 
 ---
 
-# 3. Fonti dati e ruoli
+# 3. Architettura obbligatoria
 
-## 3.1 SerpApi — provider primario
+Pattern generale:
 
-Quota free di riferimento: 250 ricerche/mese, 50/ora. Il saldo deve essere considerato **condiviso** e verificato live secondo la policy.
+`UI → logica ricerca → provider → cache/database`
 
-Engine:
+Pattern dati:
 
-- `google_flights`: ricerca precisa, Verifica e futuro Dettaglio;
-- `google_travel_explore`: Discovery economica per Weekend, Ovunque, paesi/regioni e ricerche ampie;
-- Google Flights Deals: Discovery aggiuntiva quando appropriata.
+**DISCOVERY → VERIFICA → DETTAGLIO**
+
+## Discovery
+
+Ridurre il numero di query usando a seconda del caso:
+
+- SerpApi Google Travel Explore;
+- SearchAPI.io Google Flights Calendar;
+- Google Flights Deals;
+- query multi-aeroporto;
+- cache locale;
+- campionamento euristico.
+
+## Verifica
+
+Verificare solo pochi candidati migliori con Google Flights preciso.
+
+## Dettaglio
+
+Recuperare on-demand solo quando serve:
+
+- `departure_token` / ritorno associato;
+- segmenti;
+- scali;
+- operating carrier/codeshare;
+- paese degli scali;
+- stessa compagnia;
+- dettaglio scalo;
+- Maps.
+
+Mai scaricare automaticamente il dettaglio completo di decine di risultati.
+
+---
+
+# 4. Provider dati
+
+## 4.1 SerpApi — provider primario
+
+Ruoli:
+
+- `google_flights`: ricerca precisa e verifica finale;
+- `google_travel_explore`: Discovery economica per weekend/Ovunque/paesi/range ampi;
+- Google Flights Deals: Discovery quando il caso d'uso coincide con i suoi parametri.
+
+Quota free di riferimento del progetto: 250 ricerche/mese, 50/ora. La chiave è condivisa con un altro progetto personale, quindi il saldo live è sempre autorevole.
 
 ### Account API
 
-La Account API SerpApi è gratuita e non consuma la quota normale. Il saldo live restituito è la fonte autorevole per VolaFlex.
+Usata prima dei batch live per leggere le query rimaste. Non conta nella quota normale secondo la documentazione SerpApi verificata durante il progetto.
 
-### Nota: chiave SerpApi condivisa con altro progetto
+### Regole quota SerpApi
 
-La API key SerpApi **non è dedicata a VolaFlex**: lo stesso account viene usato da un altro progetto personale.
+- >50: normale;
+- <=50: cache/modalità risparmio più aggressive;
+- <=20: conferma/forte prudenza per batch >5;
+- <=5: cache/Discovery/query singole/euristiche;
+- preservare una riserva minima di 5 query;
+- mai 30–40 chiamate automatiche con un singolo tap.
 
-Conseguenze:
+## 4.2 SearchAPI.io Calendar — acceleratore mirato
 
-- il saldo può diminuire fuori dall'app;
-- nessun contatore locale è fonte di verità;
-- refresh live Account API obbligatorio prima di ricerche stimate costose (>5 query);
-- nelle funzioni già implementate si usa un controllo ancora più prudente prima di ogni batch/fase live;
-- se Account API fallisce, non avviare una ricerca costosa automaticamente;
-- proteggere sempre una riserva minima di 5 query;
-- non creare un secondo account solo per separare la quota se richiede fornire un numero di telefono.
+Endpoint:
 
-## 3.2 SearchAPI.io Calendar — acceleratore mirato
+`GET https://www.searchapi.io/api/v1/search?engine=google_flights_calendar`
 
-Da introdurre nei prossimi sotto-step v2 per N notti/±X/range ampi. Non è un secondo motore voli completo.
+Ruolo: **date discovery accelerator**, non secondo motore voli completo.
 
-Decisioni già fissate:
+Usato per N notti / ±X e futuri range ampi quando il costo SerpApi equivalente supera circa 10 date da interrogare.
 
-- massimo 200 combinazioni andata/ritorno per richiesta;
-- per N notti filtrare localmente `return = departure + N`;
-- chunk sincronizzati max 14 date (`14²=196`, `15²=225` supera 200);
-- circa `ceil(D/14)` query Calendar per D partenze candidate;
-- i 100 crediti gratuiti non sono considerati ricorrenti finché non confermato;
-- VolaFlex deve funzionare anche senza SearchAPI.io.
+Regole verificate:
 
-## 3.3 Mapping preset da non confondere
+- round-trip: massimo circa **200 combinazioni outbound/return per chiamata**; sopra il limite la risposta può essere vuota;
+- per N notti esatti non esiste un parametro “durata fissa N”: si inviano range andata/ritorno e si filtra localmente la diagonale `return = departure + N`;
+- blocco massimo sincronizzato scelto: **14 partenze** perché `14×14=196`; `15×15=225` supera 200;
+- per D partenze candidate: circa `ceil(D/14)` chiamate Calendar;
+- autenticazione tramite `api_key`;
+- valuta richiesta esplicitamente `EUR`;
+- SearchAPI.io è opzionale: VolaFlex deve funzionare senza questa chiave;
+- i 100 crediti gratuiti sono trattati come pool limitato/non necessariamente ricorrente finché non verificato diversamente.
 
-Travel Explore: `travel_duration=1` Weekend, `2` 1 week, `3` 2 weeks.  
-Google Flights Deals: `1` 1 week, `2` Weekend, `3` 2 weeks.
+Esempi di costo Calendar già fissati:
 
-## 3.4 `price_insights`
+- ±5 → 11 partenze → 1 Calendar;
+- ±7 → 15 partenze → 2 Calendar;
+- ±10 → 21 partenze → 2 Calendar;
+- ±15 → 31 partenze → 3 Calendar;
+- ±20 → 41 partenze → 3 Calendar.
 
-Non usare come calendario ±X: descrive statisticamente la stessa rotta/date, non date alternative.
+## 4.3 Mapping preset da non confondere
+
+Travel Explore:
+
+- `travel_duration=1` = Weekend;
+- `2` = 1 week;
+- `3` = 2 weeks.
+
+Google Flights Deals usa mapping differente:
+
+- `1` = 1 week;
+- `2` = Weekend;
+- `3` = 2 weeks.
+
+## 4.4 `price_insights`
+
+Non usare come calendario ±X: descrive statisticamente la stessa rotta/date interrogata, non date alternative.
 
 ---
 
-# 4. Pattern architetturale obbligatorio
+# 5. Filtri SerpApi già verificati
 
-`DISCOVERY → VERIFICA → DETTAGLIO`
-
-- **Discovery:** Explore, SearchAPI Calendar, Deals, multi-airport, cache, campionamento.
-- **Verifica:** solo 1–3 candidati migliori con Google Flights e filtri precisi.
-- **Dettaglio:** solo on-demand, incluso `departure_token`, ritorno associato, segmenti, scali, operating carrier/codeshare, paesi scalo, stessa compagnia e Maps.
-
-Mai scaricare automaticamente dettagli completi di decine di risultati.
-
----
-
-# 5. Filtri SerpApi verificati
-
-- `layover_duration=MIN,MAX` in minuti;
+- `layover_duration=MIN,MAX` in minuti + controllo Kotlin;
 - `exclude_conns` per aeroporti di connessione;
 - esclusione paese connessione: non nativa → lookup locale IATA→paese;
 - `include_airlines` / `exclude_airlines`;
-- stessa compagnia operativa: controllo Kotlin client-side;
-- `outbound_times` e `return_times` per fasce orarie Google Flights round-trip.
-
-## 5.1 Formato ufficiale `outbound_times` / `return_times` — REGOLA CRITICA
-
-Formato SerpApi ufficiale: **2 oppure 4 numeri interi di ora `0..23`, separati da virgola**. Ogni numero rappresenta l'inizio di un'ora. **Non usare `HH:MM`.**
+- stessa compagnia operativa: controllo Kotlin;
+- `outbound_times` / `return_times`: **2 o 4 ore intere 0–23 separate da virgola**.
 
 Esempi validi:
 
-- `17,23` = partenza dalle 17:00 fino a mezzanotte;
-- `5,11` = partenza dalle 05:00 fino a circa mezzogiorno;
-- `0,23` = partenza senza restrizione pratica sull'intera giornata;
-- 4 valori possono filtrare separatamente partenza e arrivo.
+- `17,23`;
+- `5,11`;
+- `0,23`;
+- `4,18,3,19`.
 
-Pattern Weekend v2.2 correnti:
+Da v2.2 esiste `SerpApiTimeFilterGuard`: un interceptor OkHttp blocca localmente formati non validi prima della rete, evitando consumo quota per regressioni tipo `17:00,23:59`.
 
-- Pattern A venerdì sera → domenica sera: `outbound_times=17,23`, `return_times=17,23`;
-- Pattern B sabato mattina → lunedì: `outbound_times=5,11`, `return_times=0,23`.
-
-### Audit 2026-09-10
-
-Il proprietario ha fermato il test per verificare il formato ufficiale. Audit del codice: **la build `0.1.0-dev.17` conteneva già esattamente i valori corretti sopra**. L'errore era nella descrizione testuale dell'assistente che rappresentava le fasce in forma leggibile `17:00–23:59`; non nel valore inviato dall'app. Quindi nessuna query è stata sprecata per un formato `HH:MM`, perché quel formato non era nel runtime.
-
-Hardening aggiunto: `SerpApiTimeFilterGuard`, interceptor OkHttp che, per `engine=google_flights`, valida localmente `outbound_times`/`return_times` e rifiuta prima di `chain.proceed` qualsiasi valore che non sia composto da 2 o 4 ore intere `0..23` con intervalli ordinati. Obiettivo: impedire a future regressioni di uscire dal telefono e consumare quota.
-
-Il dettaglio esatto del volo di ritorno richiede una richiesta successiva con `departure_token`; i filtri sul ritorno possono invece essere applicati già alla query iniziale.
+Il dettaglio esatto del ritorno di un round-trip richiede una richiesta successiva con `departure_token`; non viene richiesto automaticamente.
 
 ---
 
-# 6. Modelli dati
+# 6. Credenziali API e sicurezza
 
-## 6.1 DatePriceCandidate
+API key salvate localmente con DataStore Preferences; mai nel repository; mai inviate in chat; `android:allowBackup=false`.
 
-`outboundDate`, `returnDate`, `indicativePrice`, `currency`, `source`.
+- SerpApi: obbligatoria per le ricerche reali;
+- SearchAPI.io: opzionale;
+- UI mostra solo configurata/non configurata;
+- campi password-style;
+- campo vuoto al salvataggio mantiene il valore esistente.
 
-## 6.2 WeekendCandidate
+DataStore non cifra autonomamente a riposo; rischio accettato per app personale nello storage privato Android.
 
-`outboundDate`, `returnDate`, `price`, `currency`, `destinationIata`, `destinationName`, `monthLabel`, `monthKey`, eventuale `verification`.
+---
 
-I dati base sono Discovery indicativa Travel Explore.
+# 7. Directory aeroporti locale
 
-## 6.3 VerifiedWeekendResult — v2.2
+`data/local/AirportDirectory.kt`
 
-Contiene:
+Mapping:
 
-- pattern scelto;
-- date precise;
-- prezzo round-trip verificato;
+`IATA → aeroporto → città → ISO country`
+
+Usi:
+
+- guard anti-typo prima della rete;
+- futuro paese scali;
+- futura autocomplete;
+- filtro paese scalo.
+
+Codice sconosciuto: warning `Correggi` / `Cerca comunque`, senza query automatica. Test reale `FC0`: PASS, 0 query.
+
+---
+
+# 8. Cache Room e diagnostica
+
+## Room
+
+Database `volaflex.db`.
+
+Schema corrente con v2.3: **versione 3**.
+
+Tabelle:
+
+- `flight_search_cache` — date fisse;
+- `weekend_search_cache` — weekend;
+- `nights_search_cache` — N notti / ±X;
+- `diagnostic_events`.
+
+TTL cache ricerche: **4 ore**.
+
+Migrazioni:
+
+- 1→2: aggiunta `weekend_search_cache`, validata sul telefono senza perdita dati;
+- 2→3: aggiunta `nights_search_cache`, da validare sul telefono con v2.3.
+
+La cache N notti salva il risultato completo serializzato JSON e include la strategia (`SERP_EXHAUSTIVE`, `SEARCHAPI_CALENDAR`, `SERP_SAMPLE`) nella chiave. Questo permette, dopo futura configurazione SearchAPI.io, di non riusare per errore una cache euristica creata senza Calendar.
+
+## Diagnostica
+
+Conserva gli ultimi 20 eventi.
+
+Tipi attuali:
+
+- `SERPAPI_ACCOUNT`;
+- `GOOGLE_FLIGHTS`;
+- `TRAVEL_EXPLORE`;
+- `WEEKEND_VERIFY`;
+- `SEARCHAPI_CALENDAR`;
+- `CACHE`;
+- `QUOTA_GUARD`.
+
+Le API key non devono mai apparire nei log diagnostici.
+
+---
+
+# 9. Modelli dati principali
+
+## `WeekendCandidate`
+
+Discovery indicativa Travel Explore.
+
+## `VerifiedWeekendResult`
+
+Risultato finale v2.2 con pattern, date, prezzo, compagnia/orari/scali andata, fascia ritorno applicata, quota e timestamp.
+
+## `NightsSearchResult`
+
+Risultato v2.3:
+
+- data andata;
+- data ritorno;
+- numero notti;
+- prezzo verificato;
 - valuta;
-- compagnie dell'andata;
-- orari esatti partenza/arrivo dell'andata;
-- scali andata;
-- fascia ritorno applicata;
-- quota live prima della Verifica;
-- timestamp verifica.
+- compagnia/orari/scali andata;
+- data target e ±X;
+- strategia usata;
+- date candidate totali e valutate;
+- prezzo Discovery indicativo quando Calendar;
+- numero chiamate Calendar;
+- numero chiamate SerpApi Google Flights;
+- quota live prima della ricerca;
+- timestamp;
+- stato cache.
 
-Il segmento/orario esatto del ritorno resta rinviato a `departure_token`.
+## `FlightItinerary` — futuro modello finale
 
-## 6.4 FlightItinerary — modello finale previsto
+- prezzo/valuta/durata;
+- segmenti andata/ritorno;
+- scali;
+- provider;
+- timestamp.
 
-Prezzo/valuta/durata, segmenti andata/ritorno, scali, provider, timestamp.  
-`FlightSegment`: aeroporti, date/orari, durata, airline, operating carrier, numero volo.  
-`Layover`: IATA, nome, città, paese, durata, overnight.
+`FlightSegment`: aeroporti, date/orari, durata, marketing airline, operating carrier, numero volo.
 
-## 6.5 SimpleFlightResult — transitorio v1
-
-Prezzo round-trip, valuta, compagnie/orari/scali dell'andata, quota pre-ricerca, cache/timestamp.
-
----
-
-# 7. Directory aeroporti locale — IMPLEMENTATA E VALIDATA
-
-`data/local/AirportDirectory.kt`, circa 180–200 aeroporti principali. Struttura riutilizzabile:
-
-`IATA → nome aeroporto → città → ISO country`
-
-Usi: anti-typo, futuro autocomplete, lookup paese scali e filtro paese di scalo. Codice sconosciuto → warning `Correggi` / `Cerca comunque`, senza query automatica. Test `FC0`: PASS, 0 query.
+`Layover`: IATA, aeroporto, città, paese, durata, overnight.
 
 ---
 
-# 8. Policy anti-esaurimento quota
-
-Soglie sul saldo **live**:
-
-- >50: normale;
-- ≤50: cache/modalità risparmio più aggressive;
-- ≤20: conferma prima di ricerca stimata >5 query;
-- ≤5: privilegiare cache/Explore/query singole/euristiche e bloccare ricerche non necessarie;
-- mai 30–40 chiamate automatiche con un tap.
-
-Protezione implementata:
-
-1. validazione IATA prima della rete;
-2. cache Room prima dell'Account API;
-3. cache hit fresco salta Account API + provider;
-4. cache miss/refresh → Account API → quota guard → provider;
-5. `Aggiorna comunque` è override esplicito;
-6. riserva minima 5 query dopo il batch previsto;
-7. time-filter guard impedisce parametri orari malformati prima della rete.
-
-### Weekend v2.2 cache miss completa
-
-- 1 mese: 1 Explore + max 2 Google Flights = **max 3 query**;
-- 2 mesi: max 4;
-- 3 mesi: max 5;
-- Account API gratuita e ripetuta prima della Verifica.
-
----
-
-# 9. Cache Room — IMPLEMENTATA
-
-Room 2.8.4 + KSP 2.3.11. DB `volaflex.db`, schema **2**.
-
-## 9.1 Date fisse
-
-Tabella `flight_search_cache`, chiave `origine|destinazione|andata|ritorno`, TTL 4h.
-
-## 9.2 Weekend
-
-Tabella `weekend_search_cache`, chiave `WEEKEND|origine|destinazione|mese/intervallo`, TTL 4h.
-
-Da v2.2 il JSON contiene opzionalmente `VerifiedWeekendResult`; nessuna migrazione Room 2→3.
-
-- cache già verificata entro 4h → 0 query;
-- cache v2.1 fresca senza verification → saltare Explore e fare solo Verifica;
-- verifica fallita/bloccata → conservare Discovery;
-- `Aggiorna comunque` forza volontariamente il live refresh.
-
-Migrazione Room 1→2 validata realmente sul telefono senza perdita dati.
-
----
-
-# 10. Diagnostica — IMPLEMENTATA E VALIDATA
-
-Ultimi 20 eventi con timestamp, tipo, esito, HTTP status e messaggio sintetico. Tipi attuali:
-
-`SERPAPI_ACCOUNT`, `GOOGLE_FLIGHTS`, `TRAVEL_EXPLORE`, `WEEKEND_VERIFY`, `CACHE`, `QUOTA_GUARD`.
-
-Nessuna API key nei log. Schermata da Impostazioni con `Copia diagnostica`, validata sul telefono.
-
----
-
-# 11. Stack tecnologico corrente
+# 10. Stack tecnologico corrente
 
 - Kotlin + Jetpack Compose;
 - AGP 9.3.1;
@@ -284,7 +331,7 @@ AGP 9.x usa Kotlin integrato: non applicare `org.jetbrains.kotlin.android`.
 
 ---
 
-# 12. Identità, workflow, Release e firma
+# 11. Identità, CI, Release e firma
 
 Workflow:
 
@@ -296,213 +343,210 @@ Release sviluppo:
 - titolo `VolaFlex - Development latest`;
 - asset `VolaFlex-dev.apk`.
 
-`PROJECT_SPEC.md`, `SESSION_HANDOFF.md` e `.github/workflows/android-build.yml` sono esclusi dai trigger push per evitare build documentali.
+`PROJECT_SPEC.md`, `SESSION_HANDOFF.md` e `.github/workflows/android-build.yml` sono esclusi dal trigger push.
 
 Firma persistente validata end-to-end:
 
 `a1f432f512e3d1867ee4b4535fb06a83fae5413ee700113b34e8b926a2767df3`
 
-Keystore con doppio backup personale; password conservata separatamente. Per Secrets amministrativi usare UI GitHub se il token Codespaces (`gh secret set`) restituisce 403.
+Keystore con doppio backup personale; password conservata separatamente.
+
+Nota Codespaces: `gh secret set` può fallire con `403 Resource not accessible by integration`; per Secrets amministrativi usare UI GitHub se il token non ha permessi.
 
 ---
 
-# 13. Credenziali API e Impostazioni
+# 12. Stato roadmap
 
-API key in DataStore Preferences locale, mai codice/repository; `android:allowBackup=false`.
+## Fase 0 — infrastruttura
 
-- SerpApi obbligatoria;
-- SearchAPI.io opzionale;
-- UI mostra solo `configurata ✓`, mai il valore.
+**CHIUSA 100%.**
 
-Persistenza testata dopo chiusura completa. DataStore non cifra autonomamente a riposo: rischio accettato per app personale su storage privato Android.
+## v1 — Fondamenta
 
-La chiave personale non è disponibile nel repository, nei Secrets CI o in chat. Di conseguenza CI/connettore non devono e non possono eseguire test live autenticati SerpApi con la chiave dell'utente.
+**CHIUSA E VALIDATA 100% SUL TELEFONO.**
 
----
+Include:
 
-# 14. Navigazione UI corrente
+- firma stabile;
+- API key DataStore;
+- prima ricerca reale SerpApi;
+- IATA guard;
+- Room cache;
+- diagnostica/clipboard.
 
-Route: `home`, `search` (Date fisse), `weekend`, `settings`, `diagnostics`.
+Test date fisse storico: `FCO→MAD`, 16–19/10/2026, Ryanair, 104 EUR, 0 scali andata.
 
-Ricerca espone `Date fisse | Weekend`.
+## v2.1 — Weekend Discovery
 
----
+**CHIUSA E VALIDATA.**
 
-# 15. v1 — Fondamenta: CHIUSA E VALIDATA
+Test reale `FCO→MAD`, ottobre 2026:
 
-- firma stabile: completata/validata end-to-end;
-- Impostazioni API key: completate/validate;
-- prima ricerca reale: `FCO→MAD`, 16–19/10/2026, Ryanair, 104 EUR, 0 scali andata, quota 131/250;
-- IATA guard/cache/diagnostica: validate;
-- round finale v1: **1 query osservata = 1 stimata**.
+- Explore: 01/10→05/10;
+- 95 EUR indicativi;
+- consumo 1 query;
+- cache PASS.
 
----
+Osservazione: `travel_duration=1` può restituire un intervallo più lungo del weekend breve richiesto. Da qui la necessità della v2.2.
 
-# 16. v2 — Date flessibili
+## v2.2 — Weekend Verifica precisa
 
-## 16.1 v2.1 Weekend Discovery — CHIUSA E VALIDATA
+**CHIUSA E VALIDATA END-TO-END SUL TELEFONO — 2026-09-10.**
 
-Travel Explore con un'origine/destinazione, 1/2/3 mesi, `travel_duration=1`, cache 4h e diagnostica `TRAVEL_EXPLORE`.
+Architettura:
 
-Test reale:
-
-- `FCO→MAD`, ottobre 2026;
-- candidato `01/10/2026→05/10/2026`;
-- 95 EUR;
-- migrazione Room 1→2 PASS senza perdita dati;
-- cache Weekend PASS;
-- **1 query osservata = 1 stimata**.
-
-Osservazione fondamentale: Explore ha restituito **giovedì→lunedì, 4 notti**. Quindi il preset Weekend è Discovery indicativa e non garantisce il weekend breve richiesto. Questa è la motivazione della v2.2.
-
-## 16.2 v2.2 Weekend Verifica precisa — IMPLEMENTATA, CI VERDE, DA VALIDARE SUL TELEFONO
-
-Dopo Explore:
-
-1. scegliere solo il candidato più economico;
-2. generare al massimo due pattern precisi;
-3. nuovo Account API live;
-4. Google Flights per i soli pattern generati;
-5. scegliere il risultato verificato più economico;
-6. non enumerare tutti i weekend del mese.
+1. Explore Discovery;
+2. candidato più economico;
+3. massimo due pattern Google Flights precisi;
+4. cache Discovery + Verifica.
 
 Pattern:
 
-- **A — venerdì sera → domenica sera:** date venerdì/domenica; API `outbound_times=17,23`, `return_times=17,23`;
-- **B — sabato mattina → lunedì:** date sabato/lunedì; API `outbound_times=5,11`, `return_times=0,23`.
+- A: venerdì `17,23` → domenica `17,23`;
+- B: sabato `5,11` → lunedì `0,23`.
 
-UI: card distinta `Weekend verificato ✓` con date, prezzo, compagnia/orari/scali dell'andata e fascia ritorno applicata. Il ritorno esatto via `departure_token` resta alla fase Dettaglio.
+### Test reale definitivo v2.2
 
-Diagnostica: `WEEKEND_VERIFY` con SUCCESS/EMPTY/ERROR e HTTP status.
+Rotta: **FCO → MAD**, novembre 2026.
 
-Cache: verification nello stesso JSON v2, nessuna migrazione DB.
+Discovery Travel Explore:
 
-### Audit/hardening parametri orari
+- prezzo indicativo: **57 EUR**;
+- range indicativo: **26/11/2026 → 30/11/2026**.
 
-Il codice v2.2 originale della build `0.1.0-dev.17` usava già i valori ufficiali a ore intere. Dopo verifica documentale è stato aggiunto `SerpApiTimeFilterGuard` come difesa preventiva. Nessuna query SerpApi viene eseguita durante GitHub Actions; i run di build non consumano quota.
+Verifica Google Flights:
 
-### CI corrente v2.2 hardening
+- pattern vincente: **B — sabato → lunedì**;
+- compagnia: **Wizz Air**;
+- prezzo round-trip verificato: **54 EUR**;
+- partenza andata: **06:00**;
+- `06:00` è correttamente dentro `outbound_times=5,11`;
+- scali andata: **0**.
 
-GitHub Actions **run #19: SUCCESS**.
+Consumo reale:
 
-- versione: `0.1.0-dev.19`;
-- `compileReleaseKotlin`: SUCCESS;
-- `assembleRelease`: SUCCESS;
-- zipalign: SUCCESS;
-- apksigner verify: SUCCESS;
-- fingerprint: `a1f432f512e3d1867ee4b4535fb06a83fae5413ee700113b34e8b926a2767df3`;
-- APK SHA-256: `71ab13c021542cb5e2e19fe545b79d7f73eb131e748d5740f4d2f5d5d84e8310`;
-- Release `dev-latest` aggiornata.
+- ricerca iniziale: **3 query SerpApi**;
+- budget previsto: **3**;
+- ripetizione identica entro TTL: **0 nuove query**;
+- Discovery + Verifica riutilizzate interamente da cache.
 
-Run #18 è stato cancellato da `cancel-in-progress` quando è partito #19; non è un errore di codice.
+**Conclusione: v2.2 CHIUSA.**
 
-Non è stata effettuata una prova live autenticata dal connettore: per design la API key personale è solo sul telefono. La semantica dei parametri è stata verificata sulla documentazione ufficiale; il comportamento provider-runtime verrà validato nel test reale v2.2 sul telefono.
+## v2.3 — N notti / ±X giorni
 
-## 16.3 Prossimi sotto-step v2
+**IMPLEMENTATA SUL BRANCH TECNICO; CI E TEST TELEFONO DA VALIDARE.**
 
-Dopo validazione v2.2:
+### UI
 
-- N notti / ±X con SearchAPI.io Calendar;
-- range ampi;
-- fallback euristico/quota-saver.
+Terza modalità nella schermata Ricerca:
+
+`Date fisse | Weekend | N notti`
+
+Input iniziali:
+
+- singolo aeroporto partenza;
+- singolo aeroporto destinazione;
+- numero notti 1–30;
+- data target di partenza;
+- flessibilità ±X, inizialmente 0–60.
+
+### Doppio binario / strategia
+
+Sia `D` il numero effettivo di partenze candidate nel range.
+
+**A. Range piccolo — `D <= 10`**
+
+- SerpApi Google Flights diretto;
+- una query precisa per ogni data candidata;
+- selezione del prezzo più basso;
+- nessuna query duplicata di “verifica”, perché ogni chiamata Discovery è già una Google Flights precisa con date esatte e ordinamento prezzo.
+
+**B. Range ampio — `D > 10` + SearchAPI.io configurata**
+
+- SearchAPI.io Calendar;
+- `chunked(14)`;
+- ogni blocco produce massimo `14×14=196` combinazioni;
+- filtro locale `return = departure + N`;
+- selezione candidato Calendar più economico;
+- **1 query SerpApi Google Flights precisa** sul candidato migliore per verifica finale.
+
+**C. Range ampio — `D > 10` senza SearchAPI.io**
+
+- modalità risparmio quota SerpApi;
+- 5 date iniziali distribuite uniformemente nell'intervallo;
+- fino a 2 date adiacenti alla migliore iniziale;
+- massimo **7 query SerpApi**;
+- le query campionate sono già Google Flights precise e quindi il miglior campione è già verificato senza duplicare una chiamata identica.
+
+### Quota v2.3
+
+Prima di qualsiasi batch live: Account API SerpApi.
+
+Richiesta minima:
+
+`riserva 5 + massimo numero di query SerpApi previsto dalla strategia`.
+
+Quindi:
+
+- Serp esaustivo: 5 + D;
+- Serp sample: 5 + massimo 7;
+- Calendar: 5 + 1 SerpApi finale.
+
+Le chiamate SearchAPI.io usano il pool SearchAPI, non la quota SerpApi.
+
+### Cache v2.3
+
+Nuova `nights_search_cache`, TTL 4 ore.
+
+Cache hit identico:
+
+- 0 Account API;
+- 0 SearchAPI Calendar;
+- 0 SerpApi Google Flights.
+
+`Aggiorna comunque` forza un nuovo run live.
+
+### Diagnostica v2.3
+
+Nuovo tipo:
+
+`SEARCHAPI_CALENDAR`
+
+Ogni blocco registra SUCCESS / EMPTY / ERROR senza API key.
 
 ---
 
-# 17. v3 — Geografia avanzata
+# 13. Prossimi step dopo v2.3
 
-Fino a 3 origini, 3 destinazioni, Ovunque, paese/area, Explore/Deals, directory aeroporti estesa, deduplicazione.
+Dopo validazione reale v2.3:
 
----
-
-# 18. v4 — Scali avanzati
-
-Durata max scalo, esclusione paese, stessa compagnia operativa, dettaglio scali, >8h, Maps, robustezza/fallback.
+- completare/chiudere v2 “Date flessibili” con eventuale rifinitura range ampi;
+- v3 geografia: multi-origine, multi-destinazione, Ovunque, paese;
+- v4 scali avanzati: durata, paese escluso, stessa compagnia, dettagli, Maps.
 
 ---
 
-# 19. Decisioni e motivazioni
+# 14. Rischi noti e accettati
 
-- Kotlin + Compose: Android-only, stack ridotto.
-- SerpApi primario: compatibile con Google Flights/Explore e free tier.
-- SearchAPI Calendar acceleratore: riduce query senza mantenere due motori completi.
-- Travel Explore solo Discovery: test reale ha mostrato intervallo Weekend troppo lungo.
-- Verifica mirata max 2 query: evita brute force.
-- Discovery→Verifica→Dettaglio: protezione strutturale quota.
-- GitHub-only e Release `dev-latest`: requisiti espliciti.
-- DataStore per API key; Room per cache+diagnostica.
-- Directory IATA statica: zero rete/costo.
-- Verification nel JSON esistente: evita migrazione Room inutile.
-- Guard locale time-filter: prevenire consumo quota causato da parametri orari malformati.
-
----
-
-# 20. Rischi noti e accettati
-
-- SerpApi/SearchAPI.io possono cambiare JSON o avere downtime;
-- ricerche ampie non sempre matematicamente esaustive;
+- provider possono cambiare JSON/parametri o avere downtime;
+- SearchAPI.io e SerpApi dipendono entrambi dall'ecosistema Google Flights, quindi non sono vera ridondanza upstream;
+- SearchAPI.io free pool può essere limitato/one-time;
+- ricerca euristica senza Calendar non è matematicamente esaustiva;
 - quota SerpApi limitata e condivisa;
-- Travel Explore/SearchAPI Calendar sono indicativi;
-- crediti SearchAPI.io potenzialmente one-time;
-- dipendenza comune dall'ecosistema Google Flights;
-- debug GitHub-only più lento;
-- perdita keystore impedisce update con stessa identità;
-- DataStore non cifra autonomamente le chiavi;
+- perdita keystore impedisce aggiornamenti con la stessa identità;
+- DataStore non cifra autonomamente le API key a riposo;
 - directory IATA non esaustiva;
-- cache key da estendere con futuri filtri/passeggeri/multi-aeroporto;
-- v2.2 non scarica ancora segmento ritorno via `departure_token`;
-- fasce orarie Weekend sono prima interpretazione operativa e potranno diventare configurabili.
+- cache key andranno estese con futuri filtri/passeggeri/multi-aeroporto;
+- v2.2/v2.3 non scaricano automaticamente il dettaglio preciso del ritorno via `departure_token`;
+- Room migration 2→3 deve essere validata sul telefono insieme alla prima build v2.3.
 
 ---
 
-# 21. Stato reale
+# 15. Prossimo milestone operativo
 
-## Chiuso e validato sul telefono
-
-- Fase 0: 100%;
-- v1 Fondamenta: 100%;
-- firma persistente;
-- Impostazioni/API key;
-- Google Flights reale;
-- IATA guard;
-- Room cache;
-- Diagnostica/clipboard;
-- v2.1 Weekend Discovery;
-- migrazione Room 1→2;
-- cache Weekend;
-- consumo v2.1: **1 query osservata = 1 stimata**.
-
-## Implementato/CI verde, da testare sul telefono
-
-- **v2.2 Weekend Verifica precisa**;
-- formato SerpApi ufficiale confermato in codice;
-- guard locale time-filter aggiunto;
-- max 2 Google Flights sul solo candidato migliore;
-- secondo controllo quota live;
-- `WEEKEND_VERIFY`;
-- card `Weekend verificato ✓`;
-- cache verification.
-
-Build corrente: **`0.1.0-dev.19`**, run #19 SUCCESS, firma invariata.
-
----
-
-# 22. Prossimo milestone
-
-**Validazione reale v2.2 sul telefono con build `0.1.0-dev.19`.**
-
-Criteri:
-
-1. installare sopra la build corrente senza disinstallare;
-2. Ricerca → Weekend;
-3. usare `FCO→MAD`, novembre 2026, se non già in cache;
-4. 1 query Explore per il mese;
-5. secondo controllo quota live;
-6. max 2 `WEEKEND_VERIFY`;
-7. se un pattern trova voli, card `Weekend verificato ✓`;
-8. date finali venerdì→domenica oppure sabato→lunedì;
-9. Pattern A: orario partenza andata restituito coerente con `17,23`; Pattern B: coerente con `5,11`;
-10. Diagnostica con `TRAVEL_EXPLORE` + `WEEKEND_VERIFY`;
-11. ripetizione identica entro 4h interamente da cache, 0 query provider;
-12. nessun crash/schermata bianca.
-
-Dopo conferma: chiudere v2.2 e passare a **N notti / ±X con SearchAPI.io Calendar**.
+1. completare CI della build v2.3;
+2. installare sopra la build corrente senza disinstallare;
+3. verificare migrazione Room 2→3 senza perdita di impostazioni/cache/diagnostica;
+4. testare prima il ramo **SerpApi sample**, perché SearchAPI.io non è ancora configurata;
+5. ripetere la stessa ricerca entro 4h e verificare 0 nuove query;
+6. in un secondo momento configurare SearchAPI.io e testare il ramo Calendar su un nuovo set di parametri.
