@@ -11,12 +11,14 @@ import kotlinx.serialization.SerializationException
 private const val MIN_SEARCHES_LEFT_TO_PROCEED = 5
 private const val CACHE_TTL_MILLIS = 4L * 60L * 60L * 1000L
 private const val MAX_FIXED_DATE_ORIGINS = 3
+private const val MAX_FIXED_DATE_DESTINATIONS = 3
 
 data class SimpleFlightResult(
     val price: Int,
     val currency: String,
     val airlines: String,
     val departureAirportId: String,
+    val arrivalAirportId: String,
     val departureTime: String,
     val arrivalTime: String,
     val stops: Int,
@@ -43,16 +45,13 @@ class FlightSearchRepository(
     suspend fun searchRoundTrip(
         apiKey: String,
         departureIds: List<String>,
-        arrivalId: String,
+        arrivalIds: List<String>,
         outboundDate: String,
         returnDate: String,
         forceRefresh: Boolean = false
     ): FlightSearchOutcome {
-        val normalizedDepartures = departureIds
-            .map { it.trim().uppercase(Locale.ROOT) }
-            .filter { it.isNotBlank() }
-            .distinct()
-            .sorted()
+        val normalizedDepartures = canonicalizeAirportIds(departureIds)
+        val normalizedArrivals = canonicalizeAirportIds(arrivalIds)
 
         if (normalizedDepartures.isEmpty()) {
             return FlightSearchOutcome.Error("Inserisci almeno un aeroporto di partenza.")
@@ -60,14 +59,23 @@ class FlightSearchRepository(
         if (normalizedDepartures.size > MAX_FIXED_DATE_ORIGINS) {
             return FlightSearchOutcome.Error("Per ora puoi usare al massimo 3 aeroporti di partenza.")
         }
+        if (normalizedArrivals.isEmpty()) {
+            return FlightSearchOutcome.Error("Inserisci almeno un aeroporto di destinazione.")
+        }
+        if (normalizedArrivals.size > MAX_FIXED_DATE_DESTINATIONS) {
+            return FlightSearchOutcome.Error("Per ora puoi usare al massimo 3 aeroporti di destinazione.")
+        }
+        if (normalizedDepartures.any { it in normalizedArrivals }) {
+            return FlightSearchOutcome.Error("Nessuna destinazione può coincidere con uno degli aeroporti di partenza.")
+        }
 
         val normalizedDepartureQuery = normalizedDepartures.joinToString(",")
-        val normalizedArrival = arrivalId.trim().uppercase(Locale.ROOT)
+        val normalizedArrivalQuery = normalizedArrivals.joinToString(",")
         val cacheKey = buildCacheKey(
-            normalizedDepartureQuery,
-            normalizedArrival,
-            outboundDate,
-            returnDate
+            canonicalDepartureIds = normalizedDepartureQuery,
+            canonicalArrivalIds = normalizedArrivalQuery,
+            outboundDate = outboundDate,
+            returnDate = returnDate
         )
         val now = System.currentTimeMillis()
         val minimumFreshTimestamp = now - CACHE_TTL_MILLIS
@@ -81,7 +89,7 @@ class FlightSearchRepository(
                 diagnostics.log(
                     requestType = "CACHE",
                     outcome = "HIT",
-                    message = "origins=$normalizedDepartureQuery→$normalizedArrival $outboundDate/$returnDate"
+                    message = "origins=$normalizedDepartureQuery destinations=$normalizedArrivalQuery $outboundDate/$returnDate"
                 )
                 return FlightSearchOutcome.Success(cached.toSimpleResult())
             }
@@ -112,7 +120,7 @@ class FlightSearchRepository(
             val response = service.searchGoogleFlights(
                 engine = "google_flights",
                 departureId = normalizedDepartureQuery,
-                arrivalId = normalizedArrival,
+                arrivalId = normalizedArrivalQuery,
                 outboundDate = outboundDate,
                 returnDate = returnDate,
                 type = 1,
@@ -164,7 +172,7 @@ class FlightSearchRepository(
                 .firstOrNull { it.price != null && it.flights.isNotEmpty() }
 
             if (option == null) {
-                val message = "Nessun volo trovato per questa rotta e queste date. Prova date o aeroporti diversi."
+                val message = "Nessun volo trovato per queste origini, destinazioni e date. Prova una combinazione diversa."
                 diagnostics.log(
                     requestType = "GOOGLE_FLIGHTS",
                     outcome = "EMPTY",
@@ -183,7 +191,6 @@ class FlightSearchRepository(
                 cacheDao.upsert(
                     result.toCacheEntity(
                         cacheKey = cacheKey,
-                        arrivalId = normalizedArrival,
                         outboundDate = outboundDate,
                         returnDate = returnDate,
                         cachedAtEpochMillis = now
@@ -196,7 +203,7 @@ class FlightSearchRepository(
                 requestType = "GOOGLE_FLIGHTS",
                 outcome = "SUCCESS",
                 httpStatus = response.code(),
-                message = "origins=$normalizedDepartureQuery→$normalizedArrival, winner=${result.departureAirportId}, ${result.price} ${result.currency}"
+                message = "origins=$normalizedDepartureQuery destinations=$normalizedArrivalQuery winner=${result.departureAirportId}→${result.arrivalAirportId}, ${result.price} ${result.currency}"
             )
 
             FlightSearchOutcome.Success(result)
@@ -359,6 +366,14 @@ class FlightSearchRepository(
             "authentication" in normalized
     }
 
+    private fun canonicalizeAirportIds(ids: List<String>): List<String> {
+        return ids
+            .map { it.trim().uppercase(Locale.ROOT) }
+            .filter { it.isNotBlank() }
+            .distinct()
+            .sorted()
+    }
+
     private fun FlightOptionDto.toSimpleResult(
         currency: String,
         searchesLeftBeforeSearch: Int
@@ -376,6 +391,7 @@ class FlightSearchRepository(
             currency = currency,
             airlines = airlineNames,
             departureAirportId = firstSegment.departureAirport?.id ?: "Non disponibile",
+            arrivalAirportId = lastSegment.arrivalAirport?.id ?: "Non disponibile",
             departureTime = firstSegment.departureAirport?.time ?: "Orario non disponibile",
             arrivalTime = lastSegment.arrivalAirport?.time ?: "Orario non disponibile",
             stops = layovers.size,
@@ -385,7 +401,6 @@ class FlightSearchRepository(
 
     private fun SimpleFlightResult.toCacheEntity(
         cacheKey: String,
-        arrivalId: String,
         outboundDate: String,
         returnDate: String,
         cachedAtEpochMillis: Long
@@ -393,7 +408,7 @@ class FlightSearchRepository(
         return FlightSearchCacheEntity(
             cacheKey = cacheKey,
             departureId = departureAirportId,
-            arrivalId = arrivalId,
+            arrivalId = arrivalAirportId,
             outboundDate = outboundDate,
             returnDate = returnDate,
             price = price,
@@ -413,6 +428,7 @@ class FlightSearchRepository(
             currency = currency,
             airlines = airlines,
             departureAirportId = departureId,
+            arrivalAirportId = arrivalId,
             departureTime = departureTime,
             arrivalTime = arrivalTime,
             stops = stops,
@@ -424,11 +440,11 @@ class FlightSearchRepository(
 
     private fun buildCacheKey(
         canonicalDepartureIds: String,
-        arrivalId: String,
+        canonicalArrivalIds: String,
         outboundDate: String,
         returnDate: String
     ): String {
-        return "$canonicalDepartureIds|$arrivalId|$outboundDate|$returnDate"
+        return "$canonicalDepartureIds|$canonicalArrivalIds|$outboundDate|$returnDate"
     }
 
     private sealed interface QuotaResult {
