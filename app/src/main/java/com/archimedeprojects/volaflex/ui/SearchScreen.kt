@@ -64,6 +64,7 @@ fun SearchScreen(
     apiKeyStore: ApiKeyStore,
     repository: FlightSearchRepository,
     onOpenWeekend: () -> Unit,
+    onOpenNights: () -> Unit,
     onOpenSettings: () -> Unit,
     onBackHome: () -> Unit
 ) {
@@ -127,7 +128,7 @@ fun SearchScreen(
 
         Row(
             modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(10.dp)
+            horizontalArrangement = Arrangement.spacedBy(6.dp)
         ) {
             Button(
                 onClick = {},
@@ -140,6 +141,12 @@ fun SearchScreen(
                 modifier = Modifier.weight(1f)
             ) {
                 Text("Weekend")
+            }
+            OutlinedButton(
+                onClick = onOpenNights,
+                modifier = Modifier.weight(1f)
+            ) {
+                Text("N notti")
             }
         }
 
