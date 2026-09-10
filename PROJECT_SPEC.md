@@ -104,6 +104,18 @@ Ruoli:
 
 Quota free di riferimento del progetto: 250 ricerche/mese, 50/ora. La chiave è condivisa con un altro progetto personale, quindi il saldo live è sempre autorevole.
 
+### Nota: chiave SerpApi condivisa con altro progetto
+
+La chiave SerpApi usata da VolaFlex **non è dedicata all'app**: è condivisa con un altro progetto personale esistente. Non si crea un secondo account gratuito perché richiederebbe un numero di telefono che il proprietario non vuole fornire.
+
+Conseguenze:
+
+- il contatore “query rimaste” di VolaFlex rappresenta sempre la quota reale e condivisa dell'account;
+- il saldo può diminuire in modo imprevedibile per consumo esterno all'app;
+- VolaFlex non deve mantenere un contatore locale come fonte autorevole;
+- prima dei batch live/costosi deve interrogare l'Account API;
+- se il refresh live fallisce e la ricerca stimata supera 5 query, niente batch costoso automatico: ridurre a strategia ≤5 query oppure richiedere override esplicito in una futura UI.
+
 ### Account API
 
 Usata prima dei batch live per leggere le query rimaste. Non conta nella quota normale secondo la documentazione SerpApi verificata durante il progetto.
@@ -116,6 +128,8 @@ Usata prima dei batch live per leggere le query rimaste. Non conta nella quota n
 - <=5: cache/Discovery/query singole/euristiche;
 - preservare una riserva minima di 5 query;
 - mai 30–40 chiamate automatiche con un singolo tap.
+
+Le soglie 50/20/5 restano valide anche con chiave condivisa perché si basano sul saldo letto live, non su un contatore locale.
 
 ## 4.2 SearchAPI.io Calendar — acceleratore mirato
 
@@ -138,13 +152,15 @@ Regole verificate:
 - SearchAPI.io è opzionale: VolaFlex deve funzionare senza questa chiave;
 - i 100 crediti gratuiti sono trattati come pool limitato/non necessariamente ricorrente finché non verificato diversamente.
 
-Esempi di costo Calendar già fissati:
+Esempi di costo Calendar:
 
 - ±5 → 11 partenze → 1 Calendar;
 - ±7 → 15 partenze → 2 Calendar;
 - ±10 → 21 partenze → 2 Calendar;
 - ±15 → 31 partenze → 3 Calendar;
 - ±20 → 41 partenze → 3 Calendar.
+
+**Stato 2026-09-10:** la chiave SearchAPI.io è stata configurata dall'utente nelle Impostazioni dell'app ed è disponibile localmente via DataStore. Non deve essere inviata in chat né salvata nel repository.
 
 ## 4.3 Mapping preset da non confondere
 
@@ -193,7 +209,7 @@ Il dettaglio esatto del ritorno di un round-trip richiede una richiesta successi
 API key salvate localmente con DataStore Preferences; mai nel repository; mai inviate in chat; `android:allowBackup=false`.
 
 - SerpApi: obbligatoria per le ricerche reali;
-- SearchAPI.io: opzionale;
+- SearchAPI.io: opzionale a livello architetturale, attualmente configurata sul telefono;
 - UI mostra solo configurata/non configurata;
 - campi password-style;
 - campo vuoto al salvataggio mantiene il valore esistente.
@@ -209,6 +225,8 @@ DataStore non cifra autonomamente a riposo; rischio accettato per app personale 
 Mapping:
 
 `IATA → aeroporto → città → ISO country`
+
+Copertura iniziale: circa 180–200 aeroporti principali, con Europa, Nord Africa e destinazioni comuni.
 
 Usi:
 
@@ -227,7 +245,7 @@ Codice sconosciuto: warning `Correggi` / `Cerca comunque`, senza query automatic
 
 Database `volaflex.db`.
 
-Schema corrente con v2.3: **versione 3**.
+Schema corrente: **versione 3**.
 
 Tabelle:
 
@@ -241,9 +259,11 @@ TTL cache ricerche: **4 ore**.
 Migrazioni:
 
 - 1→2: aggiunta `weekend_search_cache`, validata sul telefono senza perdita dati;
-- 2→3: aggiunta `nights_search_cache`, compilata/validata da Room/KSP in CI; validazione reale sul telefono ancora richiesta.
+- 2→3: aggiunta `nights_search_cache`, compilata/validata da Room/KSP in CI e poi esercitata sul telefono reale con la build `0.1.0-dev.22` senza problemi runtime riportati.
 
-La cache N notti salva il risultato completo serializzato JSON e include la strategia (`SERP_EXHAUSTIVE`, `SEARCHAPI_CALENDAR`, `SERP_SAMPLE`) nella chiave. Questo permette, dopo futura configurazione SearchAPI.io, di non riusare per errore una cache euristica creata senza Calendar.
+La cache N notti salva il risultato completo serializzato JSON e include la strategia (`SERP_EXHAUSTIVE`, `SEARCHAPI_CALENDAR`, `SERP_SAMPLE`) nella chiave.
+
+Questa scelta è importante: dopo la configurazione della chiave SearchAPI.io, una cache precedente `SERP_SAMPLE` non può mascherare un nuovo test `SEARCHAPI_CALENDAR`, anche a parità di rotta/data/notti/±X.
 
 ## Diagnostica
 
@@ -353,7 +373,7 @@ Keystore con doppio backup personale; password conservata separatamente.
 
 Nota Codespaces: `gh secret set` può fallire con `403 Resource not accessible by integration`; per Secrets amministrativi usare UI GitHub se il token non ha permessi.
 
-### Ultima CI v2.3
+### Ultima CI autorevole
 
 GitHub Actions run **#22 = SUCCESS**.
 
@@ -371,6 +391,8 @@ GitHub Actions run **#22 = SUCCESS**.
 - APK SHA-256: `880ba101cc7c1416846a30edeb78ce306621b44e4c02070bb8e5813595131843`;
 - asset `VolaFlex-dev.apk` pubblicato su `dev-latest`;
 - size asset: 9,867,651 byte.
+
+Le modifiche documentali successive non richiedono nuova build perché i file sono esclusi dai trigger Actions.
 
 ---
 
@@ -453,7 +475,7 @@ Consumo reale:
 
 ## v2.3 — N notti / ±X giorni
 
-**IMPLEMENTATA, CI VERDE E RELEASE PUBBLICATA; DA VALIDARE SUL TELEFONO.**
+**IMPLEMENTATA; RAMO SERPAPI CHIUSO E VALIDATO; RAMO SEARCHAPI.IO CALENDAR DA VALIDARE.**
 
 ### UI
 
@@ -461,26 +483,36 @@ Terza modalità nella schermata Ricerca:
 
 `Date fisse | Weekend | N notti`
 
-Input iniziali:
+Input:
 
 - singolo aeroporto partenza;
 - singolo aeroporto destinazione;
 - numero notti 1–30;
 - data target di partenza;
-- flessibilità ±X, inizialmente 0–60.
+- flessibilità ±X, 0–60.
 
-### Doppio binario / strategia
+### Doppio binario / strategia — implementazione confermata in `0.1.0-dev.22`
 
 Sia `D` il numero effettivo di partenze candidate nel range.
 
-**A. Range piccolo — `D <= 10`**
+`chooseStrategy(candidateCount, hasSearchApiKey)` applica esattamente:
+
+1. se `D <= 10` → `SERP_EXHAUSTIVE`;
+2. se `D > 10` e la chiave SearchAPI.io letta da `ApiKeyStore.getSearchApiKey()` è non vuota → `SEARCHAPI_CALENDAR`;
+3. altrimenti → `SERP_SAMPLE`.
+
+La schermata `NightsSearchScreen` legge sia SerpApi sia SearchAPI.io dal DataStore e passa entrambe al repository.
+
+Quindi la sola configurazione della chiave SearchAPI.io è sufficiente ad attivare il ramo Calendar per range >10 date: **non serve una modifica codice o una nuova build**.
+
+### A. Range piccolo — `D <= 10`
 
 - SerpApi Google Flights diretto;
 - una query precisa per ogni data candidata;
 - selezione del prezzo più basso;
-- nessuna query duplicata di “verifica”, perché ogni chiamata Discovery è già una Google Flights precisa con date esatte e ordinamento prezzo.
+- nessuna query duplicata di “verifica”, perché ogni chiamata è già Google Flights precisa.
 
-**B. Range ampio — `D > 10` + SearchAPI.io configurata**
+### B. Range ampio — `D > 10` + SearchAPI.io configurata
 
 - SearchAPI.io Calendar;
 - `chunked(14)`;
@@ -489,13 +521,43 @@ Sia `D` il numero effettivo di partenze candidate nel range.
 - selezione candidato Calendar più economico;
 - **1 query SerpApi Google Flights precisa** sul candidato migliore per verifica finale.
 
-**C. Range ampio — `D > 10` senza SearchAPI.io**
+### C. Range ampio — `D > 10` senza SearchAPI.io
 
 - modalità risparmio quota SerpApi;
-- 5 date iniziali distribuite uniformemente nell'intervallo;
+- 5 date iniziali distribuite uniformemente;
 - fino a 2 date adiacenti alla migliore iniziale;
 - massimo **7 query SerpApi**;
-- le query campionate sono già Google Flights precise e quindi il miglior campione è già verificato senza duplicare una chiamata identica.
+- le query campionate sono già Google Flights precise e il miglior campione è già verificato senza duplicazione.
+
+### Test reale definitivo — ramo SerpApi / fallback campionato
+
+**CHIUSO E VALIDATO SUL TELEFONO — 2026-09-10.**
+
+Parametri:
+
+- rotta: **FCO → MAD**;
+- notti: **3**;
+- target: **25/10/2026**;
+- flessibilità: **±5 giorni**;
+- date candidate totali: **11**;
+- date valutate: **7** (`5 + 2` vicine).
+
+Risultato vincente:
+
+- andata: **28/10/2026**;
+- ritorno: **31/10/2026**;
+- durata: **3 notti esatte**;
+- compagnia: **Ryanair**;
+- prezzo round-trip: **53 EUR**;
+- orario andata: **06:25 → 09:00**;
+- scali andata: **0**.
+
+Ripetizione identica entro 4 ore:
+
+- Discovery + Verifica interamente da cache;
+- **0 nuove query provider**.
+
+Conclusione: **ramo SerpApi di v2.3 CHIUSO E VALIDATO**; consumo/cache coerenti con l'architettura prevista.
 
 ### Quota v2.3
 
@@ -515,7 +577,7 @@ Le chiamate SearchAPI.io usano il pool SearchAPI, non la quota SerpApi.
 
 ### Cache v2.3
 
-Nuova `nights_search_cache`, TTL 4 ore.
+`nights_search_cache`, TTL 4 ore.
 
 Cache hit identico:
 
@@ -525,6 +587,8 @@ Cache hit identico:
 
 `Aggiorna comunque` forza un nuovo run live.
 
+La strategia fa parte della cache key, quindi un vecchio risultato `SERP_SAMPLE` e un nuovo risultato `SEARCHAPI_CALENDAR` sono namespace separati.
+
 ### Diagnostica v2.3
 
 Nuovo tipo:
@@ -533,17 +597,42 @@ Nuovo tipo:
 
 Ogni blocco registra SUCCESS / EMPTY / ERROR senza API key.
 
-### CI v2.3
+### Prossimo test — ramo Calendar
 
-Run #22 SUCCESS, build `0.1.0-dev.22`, firma persistente invariata e Release `dev-latest` aggiornata. Il test runtime resta necessario per validare la migrazione Room 2→3, la scelta strategia e il consumo reale.
+Usare **la stessa build `0.1.0-dev.22`** perché il codice Calendar è già presente e la chiave è ora configurata localmente.
+
+Test consigliato:
+
+- `FCO → MAD`;
+- **3 notti**;
+- target **15/11/2026**;
+- **±7 giorni**.
+
+Atteso:
+
+- 15 date candidate;
+- strategia UI: `SearchAPI.io Calendar`;
+- 2 blocchi Calendar: 14 + 1 partenze;
+- 1 verifica SerpApi Google Flights precisa;
+- risultato finale con ritorno esattamente 3 giorni dopo l'andata;
+- Diagnostica: `SERPAPI_ACCOUNT`, due `SEARCHAPI_CALENDAR` (SUCCESS/EMPTY), poi un solo `GOOGLE_FLIGHTS` di verifica;
+- non devono apparire 7 Google Flights come nel fallback `SERP_SAMPLE`;
+- ripetizione identica entro 4h: `CACHE HIT`, 0 query provider.
+
+Consumo previsto del test live completo:
+
+- **2 richieste SearchAPI.io Calendar**;
+- **1 query SerpApi Google Flights**;
+- Account API SerpApi gratuita;
+- replay identico: **0**.
 
 ---
 
 # 13. Prossimi step dopo v2.3
 
-Dopo validazione reale v2.3:
+Dopo validazione del ramo Calendar:
 
-- completare/chiudere v2 “Date flessibili” con eventuale rifinitura range ampi;
+- segnare v2 “Date flessibili” come chiusa, salvo eventuali rifiniture deliberate;
 - v3 geografia: multi-origine, multi-destinazione, Ovunque, paese;
 - v4 scali avanzati: durata, paese escluso, stessa compagnia, dettagli, Maps.
 
@@ -560,20 +649,19 @@ Dopo validazione reale v2.3:
 - DataStore non cifra autonomamente le API key a riposo;
 - directory IATA non esaustiva;
 - cache key andranno estese con futuri filtri/passeggeri/multi-aeroporto;
-- v2.2/v2.3 non scaricano automaticamente il dettaglio preciso del ritorno via `departure_token`;
-- Room migration 2→3 deve essere validata sul telefono insieme alla prima build v2.3.
+- v2.2/v2.3 non scaricano automaticamente il dettaglio preciso del ritorno via `departure_token`.
 
 ---
 
 # 15. Prossimo milestone operativo
 
-1. installare **`0.1.0-dev.22`** sopra la build corrente senza disinstallare;
-2. verificare che Impostazioni/API key e Diagnostica pregresse siano ancora presenti, validando Room 2→3;
-3. **non configurare ancora SearchAPI.io**: testare prima il fallback SerpApi campionato;
-4. test consigliato: `FCO → MAD`, **3 notti**, target **15/12/2026**, **±5 giorni**;
-5. ±5 produce 11 partenze candidate, quindi senza SearchAPI.io deve scegliere `SERP_SAMPLE`;
-6. consumo previsto: **5–7 query SerpApi**, Account API gratuita, **0 SearchAPI.io**;
-7. la data ritorno vincente deve essere esattamente 3 giorni dopo l'andata;
-8. Diagnostica: `SERPAPI_ACCOUNT` + `GOOGLE_FLIGHTS`, nessun `SEARCHAPI_CALENDAR`;
-9. ripetizione identica entro 4h: `CACHE HIT`, **0 query provider**;
-10. solo dopo PASS del fallback, configurare SearchAPI.io e usare un nuovo set >10 date per validare Calendar + 1 verifica SerpApi precisa.
+1. Restare sulla build **`0.1.0-dev.22`**: nessuna nuova build necessaria.
+2. Verificare in Impostazioni che SearchAPI.io risulti configurata.
+3. Aprire `Ricerca → N notti`.
+4. Inserire `FCO → MAD`, **3 notti**, target **15/11/2026**, **±7 giorni**.
+5. Prima di cercare, la preview deve indicare **SearchAPI.io Calendar in 2 blocchi + 1 verifica SerpApi**.
+6. Eseguire una sola ricerca live.
+7. Controllare risultato finale e che il ritorno sia esattamente 3 giorni dopo l'andata.
+8. In Diagnostica cercare `SERPAPI_ACCOUNT`, due `SEARCHAPI_CALENDAR` e un solo `GOOGLE_FLIGHTS` di verifica.
+9. Consumo previsto: **2 SearchAPI.io + 1 SerpApi**; Account API gratuita.
+10. Ripetere identico entro 4 ore: `CACHE HIT`, **0 query provider**.
