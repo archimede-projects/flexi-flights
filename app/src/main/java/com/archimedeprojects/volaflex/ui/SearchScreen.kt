@@ -49,6 +49,7 @@ import kotlinx.coroutines.launch
 private val displayDateFormatter: DateTimeFormatter = DateTimeFormatter.ofPattern("dd/MM/yyyy")
 private val displayTimeFormatter: DateTimeFormatter = DateTimeFormatter.ofPattern("HH:mm")
 private const val MAX_FIXED_DATE_ORIGINS = 3
+private const val MAX_FIXED_DATE_DESTINATIONS = 3
 
 private sealed interface SearchUiState {
     data object Idle : SearchUiState
@@ -71,7 +72,7 @@ fun SearchScreen(
     onBackHome: () -> Unit
 ) {
     val departureInputs = remember { mutableStateListOf("") }
-    var arrivalInput by remember { mutableStateOf("") }
+    val arrivalInputs = remember { mutableStateListOf("") }
     var outboundDate by remember { mutableStateOf(LocalDate.now().plusDays(30)) }
     var returnDate by remember { mutableStateOf(LocalDate.now().plusDays(33)) }
     var uiState by remember { mutableStateOf<SearchUiState>(SearchUiState.Idle) }
@@ -81,7 +82,9 @@ fun SearchScreen(
         val departures = departureInputs
             .map { it.trim().uppercase(Locale.ROOT) }
             .filter { it.isNotBlank() }
-        val arrival = arrivalInput.trim().uppercase(Locale.ROOT)
+        val arrivals = arrivalInputs
+            .map { it.trim().uppercase(Locale.ROOT) }
+            .filter { it.isNotBlank() }
 
         scope.launch {
             val apiKey = runCatching {
@@ -102,7 +105,7 @@ fun SearchScreen(
                 val outcome = repository.searchRoundTrip(
                     apiKey = apiKey,
                     departureIds = departures,
-                    arrivalId = arrival,
+                    arrivalIds = arrivals,
                     outboundDate = outboundDate.toString(),
                     returnDate = returnDate.toString(),
                     forceRefresh = forceRefresh
@@ -155,58 +158,26 @@ fun SearchScreen(
         }
 
         Text(
-            text = "Date fisse, classe Economy. Puoi indicare fino a 3 aeroporti di partenza; la destinazione resta singola in v3.1.",
+            text = "Date fisse, classe Economy. Puoi indicare fino a 3 aeroporti di partenza e fino a 3 destinazioni; vengono confrontati insieme in una sola query Google Flights.",
             style = MaterialTheme.typography.bodyMedium
         )
 
         Text("Aeroporti di partenza", style = MaterialTheme.typography.titleMedium)
 
         departureInputs.toList().forEachIndexed { index, value ->
-            if (index == 0) {
-                OutlinedTextField(
-                    value = value,
-                    onValueChange = {
-                        departureInputs[index] = it
-                        if (uiState is SearchUiState.IataWarning) uiState = SearchUiState.Idle
-                    },
-                    modifier = Modifier.fillMaxWidth(),
-                    label = { Text("Partenza ${index + 1} (es. FCO)") },
-                    singleLine = true,
-                    keyboardOptions = KeyboardOptions(
-                        capitalization = KeyboardCapitalization.Characters,
-                        keyboardType = KeyboardType.Ascii
-                    )
-                )
-            } else {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    OutlinedTextField(
-                        value = value,
-                        onValueChange = {
-                            departureInputs[index] = it
-                            if (uiState is SearchUiState.IataWarning) uiState = SearchUiState.Idle
-                        },
-                        modifier = Modifier.weight(1f),
-                        label = { Text("Partenza ${index + 1}") },
-                        singleLine = true,
-                        keyboardOptions = KeyboardOptions(
-                            capitalization = KeyboardCapitalization.Characters,
-                            keyboardType = KeyboardType.Ascii
-                        )
-                    )
-                    TextButton(
-                        onClick = {
-                            departureInputs.removeAt(index)
-                            uiState = SearchUiState.Idle
-                        }
-                    ) {
-                        Text("Rimuovi")
-                    }
+            AirportInputRow(
+                value = value,
+                label = if (index == 0) "Partenza 1 (es. FCO)" else "Partenza ${index + 1}",
+                removable = index > 0,
+                onValueChange = {
+                    departureInputs[index] = it
+                    if (uiState is SearchUiState.IataWarning) uiState = SearchUiState.Idle
+                },
+                onRemove = {
+                    departureInputs.removeAt(index)
+                    uiState = SearchUiState.Idle
                 }
-            }
+            )
         }
 
         if (departureInputs.size < MAX_FIXED_DATE_ORIGINS) {
@@ -221,22 +192,35 @@ fun SearchScreen(
             }
         }
 
-        OutlinedTextField(
-            value = arrivalInput,
-            onValueChange = {
-                arrivalInput = it
-                if (uiState is SearchUiState.IataWarning) {
+        Text("Aeroporti di destinazione", style = MaterialTheme.typography.titleMedium)
+
+        arrivalInputs.toList().forEachIndexed { index, value ->
+            AirportInputRow(
+                value = value,
+                label = if (index == 0) "Destinazione 1 (es. MAD)" else "Destinazione ${index + 1}",
+                removable = index > 0,
+                onValueChange = {
+                    arrivalInputs[index] = it
+                    if (uiState is SearchUiState.IataWarning) uiState = SearchUiState.Idle
+                },
+                onRemove = {
+                    arrivalInputs.removeAt(index)
                     uiState = SearchUiState.Idle
                 }
-            },
-            modifier = Modifier.fillMaxWidth(),
-            label = { Text("Arrivo (es. MAD)") },
-            singleLine = true,
-            keyboardOptions = KeyboardOptions(
-                capitalization = KeyboardCapitalization.Characters,
-                keyboardType = KeyboardType.Ascii
             )
-        )
+        }
+
+        if (arrivalInputs.size < MAX_FIXED_DATE_DESTINATIONS) {
+            OutlinedButton(
+                onClick = {
+                    arrivalInputs.add("")
+                    uiState = SearchUiState.Idle
+                },
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Text("+ Aggiungi destinazione")
+            }
+        }
 
         DateSelector(
             label = "Andata",
@@ -258,18 +242,22 @@ fun SearchScreen(
         Button(
             onClick = {
                 val departures = departureInputs.map { it.trim().uppercase(Locale.ROOT) }
-                val arrival = arrivalInput.trim().uppercase(Locale.ROOT)
+                val arrivals = arrivalInputs.map { it.trim().uppercase(Locale.ROOT) }
                 val nonBlankDepartures = departures.filter { it.isNotBlank() }
+                val nonBlankArrivals = arrivals.filter { it.isNotBlank() }
 
                 when {
-                    departures.any { it.isBlank() } || arrival.isBlank() -> {
-                        uiState = SearchUiState.Message("Compila tutti gli aeroporti di partenza aggiunti e l'arrivo.")
+                    departures.any { it.isBlank() } || arrivals.any { it.isBlank() } -> {
+                        uiState = SearchUiState.Message("Compila tutti gli aeroporti di partenza e destinazione aggiunti.")
                     }
                     nonBlankDepartures.distinct().size != nonBlankDepartures.size -> {
                         uiState = SearchUiState.Message("Gli aeroporti di partenza devono essere diversi tra loro.")
                     }
-                    arrival in nonBlankDepartures -> {
-                        uiState = SearchUiState.Message("L'arrivo non può coincidere con uno degli aeroporti di partenza.")
+                    nonBlankArrivals.distinct().size != nonBlankArrivals.size -> {
+                        uiState = SearchUiState.Message("Gli aeroporti di destinazione devono essere diversi tra loro.")
+                    }
+                    nonBlankDepartures.any { it in nonBlankArrivals } -> {
+                        uiState = SearchUiState.Message("Nessuna destinazione può coincidere con uno degli aeroporti di partenza.")
                     }
                     returnDate.isBefore(outboundDate) -> {
                         uiState = SearchUiState.Message(
@@ -277,7 +265,7 @@ fun SearchScreen(
                         )
                     }
                     else -> {
-                        val unknownCodes = (nonBlankDepartures + arrival)
+                        val unknownCodes = (nonBlankDepartures + nonBlankArrivals)
                             .distinct()
                             .filterNot(AirportDirectory::isKnown)
 
@@ -309,7 +297,7 @@ fun SearchScreen(
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     CircularProgressIndicator()
-                    Text("Controllo cache/quota e ricerca multi-origine in corso…")
+                    Text("Controllo cache/quota e ricerca multi-aeroporto in corso…")
                 }
             }
 
@@ -378,6 +366,50 @@ fun SearchScreen(
 }
 
 @Composable
+private fun AirportInputRow(
+    value: String,
+    label: String,
+    removable: Boolean,
+    onValueChange: (String) -> Unit,
+    onRemove: () -> Unit
+) {
+    if (!removable) {
+        OutlinedTextField(
+            value = value,
+            onValueChange = onValueChange,
+            modifier = Modifier.fillMaxWidth(),
+            label = { Text(label) },
+            singleLine = true,
+            keyboardOptions = KeyboardOptions(
+                capitalization = KeyboardCapitalization.Characters,
+                keyboardType = KeyboardType.Ascii
+            )
+        )
+    } else {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            OutlinedTextField(
+                value = value,
+                onValueChange = onValueChange,
+                modifier = Modifier.weight(1f),
+                label = { Text(label) },
+                singleLine = true,
+                keyboardOptions = KeyboardOptions(
+                    capitalization = KeyboardCapitalization.Characters,
+                    keyboardType = KeyboardType.Ascii
+                )
+            )
+            TextButton(onClick = onRemove) {
+                Text("Rimuovi")
+            }
+        }
+    }
+}
+
+@Composable
 private fun FlightResultCard(
     result: SimpleFlightResult,
     onForceRefresh: () -> Unit
@@ -406,6 +438,10 @@ private fun FlightResultCard(
                 text = "Origine effettiva: ${result.departureAirportId}",
                 style = MaterialTheme.typography.titleMedium
             )
+            Text(
+                text = "Destinazione effettiva: ${result.arrivalAirportId}",
+                style = MaterialTheme.typography.titleMedium
+            )
             Text("Prezzo round-trip: ${result.price} ${result.currency}")
             Text("Compagnia (andata): ${result.airlines}")
             Text("Partenza (andata): ${result.departureTime}")
@@ -428,7 +464,7 @@ private fun FlightResultCard(
             }
 
             Text(
-                text = "Le origini multiple vengono inviate insieme in una sola query Google Flights. I dettagli del ritorno restano on-demand.",
+                text = "Origini e destinazioni multiple vengono inviate insieme in una sola query Google Flights. I dettagli del ritorno restano on-demand.",
                 style = MaterialTheme.typography.bodySmall
             )
         }
