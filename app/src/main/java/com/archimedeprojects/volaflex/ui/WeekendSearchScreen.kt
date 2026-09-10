@@ -32,6 +32,7 @@ import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import com.archimedeprojects.volaflex.data.ApiKeyStore
+import com.archimedeprojects.volaflex.data.VerifiedWeekendResult
 import com.archimedeprojects.volaflex.data.WeekendCandidate
 import com.archimedeprojects.volaflex.data.WeekendMonthRequest
 import com.archimedeprojects.volaflex.data.WeekendSearchOutcome
@@ -153,7 +154,7 @@ fun WeekendSearchScreen(
         }
 
         Text(
-            text = "Discovery economica con Google Travel Explore. Cerca il weekend indicativamente più economico del mese, senza ancora verificare gli orari esatti.",
+            text = "Travel Explore trova il candidato economico; Google Flights verifica poi solo quel weekend con le fasce venerdì sera/sabato mattina → domenica sera/lunedì.",
             style = MaterialTheme.typography.bodyMedium
         )
 
@@ -218,7 +219,7 @@ fun WeekendSearchScreen(
         }
 
         Text(
-            text = "Costo stimato: ${selectedPeriod.months.size} query Travel Explore. La Account API di controllo quota è gratuita.",
+            text = "Costo massimo su cache miss: ${selectedPeriod.months.size} query Explore + fino a 2 query Google Flights. I controlli Account API sono gratuiti.",
             style = MaterialTheme.typography.bodySmall
         )
 
@@ -267,7 +268,7 @@ fun WeekendSearchScreen(
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     CircularProgressIndicator()
-                    Text("Controllo cache/quota e Travel Explore in corso…")
+                    Text("Discovery Explore e verifica Google Flights in corso…")
                 }
             }
 
@@ -339,13 +340,39 @@ private fun WeekendResultsCard(
     onForceRefresh: () -> Unit
 ) {
     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        result.verifiedWeekend?.let { verified ->
+            VerifiedWeekendCard(
+                result = verified,
+                fromCache = result.verificationFromCache
+            )
+        }
+
+        if (result.verificationMessage != null) {
+            Card(modifier = Modifier.fillMaxWidth()) {
+                Column(
+                    modifier = Modifier.padding(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Text(
+                        text = "Verifica non completata",
+                        style = MaterialTheme.typography.titleMedium
+                    )
+                    Text(result.verificationMessage)
+                    Text(
+                        text = "I candidati Explore sotto restano solo indicativi.",
+                        style = MaterialTheme.typography.bodySmall
+                    )
+                }
+            }
+        }
+
         Card(modifier = Modifier.fillMaxWidth()) {
             Column(
                 modifier = Modifier.padding(16.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
                 Text(
-                    text = "Weekend candidati",
+                    text = "Discovery Travel Explore",
                     style = MaterialTheme.typography.titleMedium
                 )
 
@@ -354,28 +381,79 @@ private fun WeekendResultsCard(
                         .atZone(ZoneId.systemDefault())
                         .format(weekendTimeFormatter)
                     Text(
-                        text = "Risultati da cache — aggiornati alle $cacheTime",
+                        text = "Discovery da cache — aggiornata alle $cacheTime",
                         style = MaterialTheme.typography.labelLarge
                     )
+                } else {
+                    Text("Quota verificata prima della Discovery: ${result.searchesLeftBeforeSearch} rimaste")
+                }
+
+                if (result.verificationFromCache) {
+                    Text(
+                        text = "Anche la verifica Google Flights proviene dalla cache locale.",
+                        style = MaterialTheme.typography.labelLarge
+                    )
+                }
+
+                Text(
+                    text = "Explore è usato solo per scegliere il weekend promettente: le sue date possono essere più lunghe del weekend breve desiderato.",
+                    style = MaterialTheme.typography.bodySmall
+                )
+
+                if (result.fromCache) {
                     OutlinedButton(
                         onClick = onForceRefresh,
                         modifier = Modifier.fillMaxWidth()
                     ) {
-                        Text("Aggiorna comunque")
+                        Text("Aggiorna comunque (usa nuove query)")
                     }
-                } else {
-                    Text("Quota verificata prima della ricerca: ${result.searchesLeftBeforeSearch} rimaste")
                 }
-
-                Text(
-                    text = "Prezzi indicativi di Discovery: la verifica di venerdì sera/sabato mattina e domenica sera/lunedì verrà aggiunta nel prossimo raffinamento.",
-                    style = MaterialTheme.typography.bodySmall
-                )
             }
         }
 
         result.candidates.forEach { candidate ->
             WeekendCandidateCard(candidate)
+        }
+    }
+}
+
+@Composable
+private fun VerifiedWeekendCard(
+    result: VerifiedWeekendResult,
+    fromCache: Boolean
+) {
+    Card(modifier = Modifier.fillMaxWidth()) {
+        Column(
+            modifier = Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(7.dp)
+        ) {
+            Text(
+                text = "Weekend verificato ✓",
+                style = MaterialTheme.typography.headlineSmall
+            )
+            if (fromCache) {
+                Text(
+                    text = "Verifica riutilizzata dalla cache locale — 0 nuove query.",
+                    style = MaterialTheme.typography.labelLarge
+                )
+            }
+            Text(result.patternLabel, style = MaterialTheme.typography.titleMedium)
+            Text("Andata: ${formatWeekendDate(result.outboundDate)}")
+            Text("Partenza esatta: ${result.outboundDepartureTime}")
+            Text("Arrivo esatto: ${result.outboundArrivalTime}")
+            Text("Ritorno: ${formatWeekendDate(result.returnDate)}")
+            Text("Fascia ritorno verificata: ${result.returnWindowLabel}")
+            Text("Compagnia (andata): ${result.airlines}")
+            Text("Scali (andata): ${result.outboundStops}")
+            Text(
+                text = "Prezzo round-trip verificato: ${result.price} ${result.currency}",
+                style = MaterialTheme.typography.titleLarge
+            )
+            Text("Quota live prima della fase di verifica: ${result.searchesLeftBeforeVerification} rimaste")
+            Text(
+                text = "Nota: la query round-trip applica anche la fascia del ritorno, ma il dettaglio esatto del volo di ritorno richiede departure_token e non viene ancora scaricato per risparmiare quota.",
+                style = MaterialTheme.typography.bodySmall
+            )
         }
     }
 }
@@ -392,12 +470,17 @@ private fun WeekendCandidateCard(candidate: WeekendCandidate) {
                 style = MaterialTheme.typography.titleMedium
             )
             Text("Destinazione: ${candidate.destinationName} (${candidate.destinationIata})")
-            Text("Andata: ${formatWeekendDate(candidate.outboundDate)}")
-            Text("Ritorno: ${formatWeekendDate(candidate.returnDate)}")
+            Text("Range indicativo Explore: ${formatWeekendDate(candidate.outboundDate)} → ${formatWeekendDate(candidate.returnDate)}")
             Text(
-                text = "Prezzo indicativo: ${candidate.price} ${candidate.currency}",
-                style = MaterialTheme.typography.titleLarge
+                text = "Prezzo indicativo Explore: ${candidate.price} ${candidate.currency}",
+                style = MaterialTheme.typography.titleMedium
             )
+            if (candidate.verification != null) {
+                Text(
+                    text = "Candidato scelto per la verifica precisa ✓",
+                    style = MaterialTheme.typography.labelLarge
+                )
+            }
         }
     }
 }
