@@ -21,6 +21,8 @@ private const val SERP_EXHAUSTIVE_MAX_DATES = 10
 private const val SERP_SAMPLE_INITIAL_DATES = 5
 private const val SERP_SAMPLE_MAX_DATES = 7
 private const val CALENDAR_MAX_SIDE = 14
+private const val MAX_NIGHTS_ORIGINS = 3
+private const val MAX_NIGHTS_DESTINATIONS = 3
 
 @Serializable
 data class NightsSearchResult(
@@ -44,6 +46,8 @@ data class NightsSearchResult(
     val serpApiSearchRequests: Int = 0,
     val searchesLeftBeforeSearch: Int,
     val verifiedAtEpochMillis: Long,
+    val departureAirportId: String = "Non disponibile",
+    val arrivalAirportId: String = "Non disponibile",
     val fromCache: Boolean = false,
     val cachedAtEpochMillis: Long? = null
 )
@@ -71,8 +75,8 @@ class NightsSearchRepository(
     suspend fun search(
         serpApiKey: String,
         searchApiKey: String?,
-        departureId: String,
-        arrivalId: String,
+        departureIds: List<String>,
+        arrivalIds: List<String>,
         nights: Int,
         targetDate: LocalDate,
         flexibilityDays: Int,
@@ -85,8 +89,27 @@ class NightsSearchRepository(
             return NightsSearchOutcome.Error("Per ora la flessibilità deve essere tra 0 e 60 giorni.")
         }
 
-        val departure = departureId.trim().uppercase(Locale.ROOT)
-        val arrival = arrivalId.trim().uppercase(Locale.ROOT)
+        val normalizedDepartures = normalizeAirportList(departureIds)
+        val normalizedArrivals = normalizeAirportList(arrivalIds)
+
+        if (normalizedDepartures.isEmpty()) {
+            return NightsSearchOutcome.Error("Inserisci almeno un aeroporto di partenza.")
+        }
+        if (normalizedArrivals.isEmpty()) {
+            return NightsSearchOutcome.Error("Inserisci almeno un aeroporto di destinazione.")
+        }
+        if (normalizedDepartures.size > MAX_NIGHTS_ORIGINS) {
+            return NightsSearchOutcome.Error("Per ora puoi usare al massimo 3 aeroporti di partenza.")
+        }
+        if (normalizedArrivals.size > MAX_NIGHTS_DESTINATIONS) {
+            return NightsSearchOutcome.Error("Per ora puoi usare al massimo 3 aeroporti di destinazione.")
+        }
+        if (normalizedDepartures.any { it in normalizedArrivals }) {
+            return NightsSearchOutcome.Error("Origini e destinazioni non possono sovrapporsi.")
+        }
+
+        val departureQuery = normalizedDepartures.joinToString(",")
+        val arrivalQuery = normalizedArrivals.joinToString(",")
         val today = LocalDate.now()
         val candidateDates = (-flexibilityDays..flexibilityDays)
             .map { offset -> targetDate.plusDays(offset.toLong()) }
@@ -103,8 +126,8 @@ class NightsSearchRepository(
             hasSearchApiKey = !searchApiKey.isNullOrBlank()
         )
         val cacheKey = buildCacheKey(
-            departure = departure,
-            arrival = arrival,
+            departures = departureQuery,
+            arrivals = arrivalQuery,
             nights = nights,
             targetDate = targetDate,
             flexibilityDays = flexibilityDays,
@@ -127,7 +150,7 @@ class NightsSearchRepository(
                     diagnostics.log(
                         requestType = "CACHE",
                         outcome = "HIT",
-                        message = "N notti $departure→$arrival, $nights notti, ±$flexibilityDays giorni"
+                        message = "N notti origins=$departureQuery destinations=$arrivalQuery, $nights notti, ±$flexibilityDays giorni, strategy=${strategy.name}"
                     )
                     return NightsSearchOutcome.Success(
                         cachedResult.copy(
@@ -170,48 +193,42 @@ class NightsSearchRepository(
         }
 
         val liveResult = when (strategy) {
-            NightsStrategy.SERP_EXHAUSTIVE -> {
-                searchSerpExhaustive(
-                    apiKey = serpApiKey,
-                    departureId = departure,
-                    arrivalId = arrival,
-                    nights = nights,
-                    candidateDates = candidateDates,
-                    targetDate = targetDate,
-                    flexibilityDays = flexibilityDays,
-                    searchesLeft = searchesLeft,
-                    now = now
-                )
-            }
+            NightsStrategy.SERP_EXHAUSTIVE -> searchSerpExhaustive(
+                apiKey = serpApiKey,
+                departureId = departureQuery,
+                arrivalId = arrivalQuery,
+                nights = nights,
+                candidateDates = candidateDates,
+                targetDate = targetDate,
+                flexibilityDays = flexibilityDays,
+                searchesLeft = searchesLeft,
+                now = now
+            )
 
-            NightsStrategy.SERP_SAMPLE -> {
-                searchSerpSample(
-                    apiKey = serpApiKey,
-                    departureId = departure,
-                    arrivalId = arrival,
-                    nights = nights,
-                    candidateDates = candidateDates,
-                    targetDate = targetDate,
-                    flexibilityDays = flexibilityDays,
-                    searchesLeft = searchesLeft,
-                    now = now
-                )
-            }
+            NightsStrategy.SERP_SAMPLE -> searchSerpSample(
+                apiKey = serpApiKey,
+                departureId = departureQuery,
+                arrivalId = arrivalQuery,
+                nights = nights,
+                candidateDates = candidateDates,
+                targetDate = targetDate,
+                flexibilityDays = flexibilityDays,
+                searchesLeft = searchesLeft,
+                now = now
+            )
 
-            NightsStrategy.SEARCHAPI_CALENDAR -> {
-                searchCalendarThenVerify(
-                    serpApiKey = serpApiKey,
-                    searchApiKey = requireNotNull(searchApiKey).trim(),
-                    departureId = departure,
-                    arrivalId = arrival,
-                    nights = nights,
-                    candidateDates = candidateDates,
-                    targetDate = targetDate,
-                    flexibilityDays = flexibilityDays,
-                    searchesLeft = searchesLeft,
-                    now = now
-                )
-            }
+            NightsStrategy.SEARCHAPI_CALENDAR -> searchCalendarThenVerify(
+                serpApiKey = serpApiKey,
+                searchApiKey = requireNotNull(searchApiKey).trim(),
+                departureId = departureQuery,
+                arrivalId = arrivalQuery,
+                nights = nights,
+                candidateDates = candidateDates,
+                targetDate = targetDate,
+                flexibilityDays = flexibilityDays,
+                searchesLeft = searchesLeft,
+                now = now
+            )
         }
 
         if (liveResult is NightsSearchOutcome.Success) {
@@ -219,8 +236,8 @@ class NightsSearchRepository(
                 cacheDao.upsert(
                     NightsSearchCacheEntity(
                         cacheKey = cacheKey,
-                        departureId = departure,
-                        arrivalId = arrival,
+                        departureId = departureQuery,
+                        arrivalId = arrivalQuery,
                         nights = nights,
                         targetDate = targetDate.toString(),
                         flexibilityDays = flexibilityDays,
@@ -442,7 +459,7 @@ class NightsSearchRepository(
                     requestType = "SEARCHAPI_CALENDAR",
                     outcome = "ERROR",
                     httpStatus = response.code(),
-                    message = "Blocco ${chunkIndex + 1}: $message"
+                    message = "Blocco ${chunkIndex + 1}, origins=$departureId destinations=$arrivalId: $message"
                 )
                 return NightsSearchOutcome.Error(message, suggestSettings)
             }
@@ -498,7 +515,7 @@ class NightsSearchRepository(
                 requestType = "SEARCHAPI_CALENDAR",
                 outcome = if (valid.isEmpty()) "EMPTY" else "SUCCESS",
                 httpStatus = response.code(),
-                message = "Blocco ${chunkIndex + 1}: ${chunk.size} partenze, ${valid.size} combinazioni esatte da $nights notti"
+                message = "Blocco ${chunkIndex + 1}: origins=$departureId destinations=$arrivalId, ${chunk.size} partenze, ${valid.size} combinazioni esatte da $nights notti"
             )
         }
 
@@ -610,7 +627,7 @@ class NightsSearchRepository(
                     requestType = "GOOGLE_FLIGHTS",
                     outcome = "ERROR",
                     httpStatus = response.code(),
-                    message = "N notti $outboundDate→$returnDate: ${mapped.message}"
+                    message = "N notti origins=$departureId destinations=$arrivalId $outboundDate→$returnDate: ${mapped.message}"
                 )
                 return mapped
             }
@@ -640,7 +657,7 @@ class NightsSearchRepository(
                     requestType = "GOOGLE_FLIGHTS",
                     outcome = "EMPTY",
                     httpStatus = response.code(),
-                    message = "N notti $outboundDate→$returnDate: nessun volo"
+                    message = "N notti origins=$departureId destinations=$arrivalId $outboundDate→$returnDate: nessun volo"
                 )
                 ExactQueryResult.Empty
             } else {
@@ -653,7 +670,7 @@ class NightsSearchRepository(
                     requestType = "GOOGLE_FLIGHTS",
                     outcome = "SUCCESS",
                     httpStatus = response.code(),
-                    message = "N notti $outboundDate→$returnDate: ${exact.price} ${exact.currency}"
+                    message = "N notti origins=$departureId destinations=$arrivalId $outboundDate→$returnDate: ${exact.price} ${exact.currency}, winner=${exact.departureAirportId}→${exact.arrivalAirportId}"
                 )
                 ExactQueryResult.Success(exact)
             }
@@ -747,15 +764,23 @@ class NightsSearchRepository(
         }
     }
 
+    private fun normalizeAirportList(values: List<String>): List<String> {
+        return values
+            .map { it.trim().uppercase(Locale.ROOT) }
+            .filter { it.isNotBlank() }
+            .distinct()
+            .sorted()
+    }
+
     private fun buildCacheKey(
-        departure: String,
-        arrival: String,
+        departures: String,
+        arrivals: String,
         nights: Int,
         targetDate: LocalDate,
         flexibilityDays: Int,
         strategy: NightsStrategy
     ): String {
-        return "NIGHTS|$departure|$arrival|$nights|$targetDate|$flexibilityDays|${strategy.name}"
+        return "NIGHTS|$departures|$arrivals|$nights|$targetDate|$flexibilityDays|${strategy.name}"
     }
 
     private fun mapSerpHttpError(code: Int): ExactQueryResult.Error {
@@ -805,6 +830,8 @@ class NightsSearchRepository(
             price = requireNotNull(price),
             currency = currency,
             airlines = airlineNames,
+            departureAirportId = firstSegment.departureAirport?.id ?: "Non disponibile",
+            arrivalAirportId = lastSegment.arrivalAirport?.id ?: "Non disponibile",
             departureTime = firstSegment.departureAirport?.time ?: "Orario non disponibile",
             arrivalTime = lastSegment.arrivalAirport?.time ?: "Orario non disponibile",
             stops = layovers.size
@@ -845,7 +872,9 @@ class NightsSearchRepository(
             calendarRequests = calendarRequests,
             serpApiSearchRequests = serpApiSearchRequests,
             searchesLeftBeforeSearch = searchesLeft,
-            verifiedAtEpochMillis = now
+            verifiedAtEpochMillis = now,
+            departureAirportId = departureAirportId,
+            arrivalAirportId = arrivalAirportId
         )
     }
 
@@ -867,6 +896,8 @@ class NightsSearchRepository(
         val price: Int,
         val currency: String,
         val airlines: String,
+        val departureAirportId: String,
+        val arrivalAirportId: String,
         val departureTime: String,
         val arrivalTime: String,
         val stops: Int
