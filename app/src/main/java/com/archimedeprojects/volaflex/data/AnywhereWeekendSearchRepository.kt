@@ -15,7 +15,6 @@ import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.intOrNull
-import kotlinx.serialization.json.jsonPrimitive
 
 private const val ANYWHERE_WEEKEND_CACHE_TTL_MILLIS = 4L * 60L * 60L * 1000L
 private const val ANYWHERE_WEEKEND_QUOTA_RESERVE = 5
@@ -327,7 +326,7 @@ class AnywhereWeekendSearchRepository(
                 val airportIata = airport?.stringOrNull("code")
                     ?.trim()
                     ?.uppercase(Locale.ROOT)
-                val airportName = airport?.stringOrNull("name") ?: airportIata
+                val airportName = airport?.stringOrNull("name")
                 val outboundDate = destination.stringOrNull("start_date")
                 val returnDate = destination.stringOrNull("end_date")
                 val price = destination.intOrNull("flight_price")
@@ -350,11 +349,12 @@ class AnywhereWeekendSearchRepository(
                     return@mapNotNull null
                 }
 
+                val resolvedIata = requireNotNull(airportIata)
                 AnywhereWeekendCandidate(
                     city = city,
                     country = country,
-                    airportIata = requireNotNull(airportIata),
-                    airportName = airportName ?: airportIata,
+                    airportIata = resolvedIata,
+                    airportName = airportName ?: resolvedIata,
                     outboundDate = requireNotNull(outboundDate),
                     returnDate = requireNotNull(returnDate),
                     price = price,
