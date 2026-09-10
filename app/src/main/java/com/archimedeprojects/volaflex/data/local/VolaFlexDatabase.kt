@@ -42,6 +42,19 @@ data class WeekendSearchCacheEntity(
     val cachedAtEpochMillis: Long
 )
 
+@Entity(tableName = "nights_search_cache")
+data class NightsSearchCacheEntity(
+    @PrimaryKey val cacheKey: String,
+    val departureId: String,
+    val arrivalId: String,
+    val nights: Int,
+    val targetDate: String,
+    val flexibilityDays: Int,
+    val strategy: String,
+    val resultJson: String,
+    val cachedAtEpochMillis: Long
+)
+
 @Entity(tableName = "diagnostic_events")
 data class DiagnosticEventEntity(
     @PrimaryKey(autoGenerate = true) val id: Long = 0,
@@ -97,6 +110,28 @@ interface WeekendSearchCacheDao {
 }
 
 @Dao
+interface NightsSearchCacheDao {
+    @Query(
+        """
+        SELECT * FROM nights_search_cache
+        WHERE cacheKey = :cacheKey
+          AND cachedAtEpochMillis >= :minimumTimestamp
+        LIMIT 1
+        """
+    )
+    suspend fun findFresh(
+        cacheKey: String,
+        minimumTimestamp: Long
+    ): NightsSearchCacheEntity?
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun upsert(entity: NightsSearchCacheEntity)
+
+    @Query("DELETE FROM nights_search_cache WHERE cachedAtEpochMillis < :minimumTimestamp")
+    suspend fun deleteOlderThan(minimumTimestamp: Long)
+}
+
+@Dao
 interface DiagnosticEventDao {
     @Insert
     suspend fun insert(event: DiagnosticEventEntity)
@@ -121,14 +156,16 @@ interface DiagnosticEventDao {
     entities = [
         FlightSearchCacheEntity::class,
         WeekendSearchCacheEntity::class,
+        NightsSearchCacheEntity::class,
         DiagnosticEventEntity::class
     ],
-    version = 2,
+    version = 3,
     exportSchema = false
 )
 abstract class VolaFlexDatabase : RoomDatabase() {
     abstract fun flightSearchCacheDao(): FlightSearchCacheDao
     abstract fun weekendSearchCacheDao(): WeekendSearchCacheDao
+    abstract fun nightsSearchCacheDao(): NightsSearchCacheDao
     abstract fun diagnosticEventDao(): DiagnosticEventDao
 
     companion object {
@@ -154,6 +191,27 @@ abstract class VolaFlexDatabase : RoomDatabase() {
             }
         }
 
+        private val MIGRATION_2_3 = object : Migration(2, 3) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    """
+                    CREATE TABLE IF NOT EXISTS `nights_search_cache` (
+                        `cacheKey` TEXT NOT NULL,
+                        `departureId` TEXT NOT NULL,
+                        `arrivalId` TEXT NOT NULL,
+                        `nights` INTEGER NOT NULL,
+                        `targetDate` TEXT NOT NULL,
+                        `flexibilityDays` INTEGER NOT NULL,
+                        `strategy` TEXT NOT NULL,
+                        `resultJson` TEXT NOT NULL,
+                        `cachedAtEpochMillis` INTEGER NOT NULL,
+                        PRIMARY KEY(`cacheKey`)
+                    )
+                    """.trimIndent()
+                )
+            }
+        }
+
         fun getInstance(context: Context): VolaFlexDatabase {
             return instance ?: synchronized(this) {
                 instance ?: Room.databaseBuilder(
@@ -161,7 +219,7 @@ abstract class VolaFlexDatabase : RoomDatabase() {
                     VolaFlexDatabase::class.java,
                     "volaflex.db"
                 )
-                    .addMigrations(MIGRATION_1_2)
+                    .addMigrations(MIGRATION_1_2, MIGRATION_2_3)
                     .build()
                     .also { database ->
                         instance = database
