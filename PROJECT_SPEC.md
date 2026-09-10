@@ -241,7 +241,7 @@ TTL cache ricerche: **4 ore**.
 Migrazioni:
 
 - 1→2: aggiunta `weekend_search_cache`, validata sul telefono senza perdita dati;
-- 2→3: aggiunta `nights_search_cache`, da validare sul telefono con v2.3.
+- 2→3: aggiunta `nights_search_cache`, compilata/validata da Room/KSP in CI; validazione reale sul telefono ancora richiesta.
 
 La cache N notti salva il risultato completo serializzato JSON e include la strategia (`SERP_EXHAUSTIVE`, `SEARCHAPI_CALENDAR`, `SERP_SAMPLE`) nella chiave. Questo permette, dopo futura configurazione SearchAPI.io, di non riusare per errore una cache euristica creata senza Calendar.
 
@@ -353,6 +353,25 @@ Keystore con doppio backup personale; password conservata separatamente.
 
 Nota Codespaces: `gh secret set` può fallire con `403 Resource not accessible by integration`; per Secrets amministrativi usare UI GitHub se il token non ha permessi.
 
+### Ultima CI v2.3
+
+GitHub Actions run **#22 = SUCCESS**.
+
+- commit: `b4e632da7723fe201a7d16be2ab66ceb382005e8`;
+- versione: **`0.1.0-dev.22`**;
+- `kspReleaseKotlin`: SUCCESS;
+- `compileReleaseKotlin`: SUCCESS;
+- `assembleRelease`: SUCCESS (`BUILD SUCCESSFUL in 2m 1s`);
+- zipalign: SUCCESS;
+- `apksigner verify`: SUCCESS;
+- signature scheme v2: true;
+- signature scheme v3: true;
+- numero signer: 1;
+- fingerprint SHA-256 certificato: `a1f432f512e3d1867ee4b4535fb06a83fae5413ee700113b34e8b926a2767df3`;
+- APK SHA-256: `880ba101cc7c1416846a30edeb78ce306621b44e4c02070bb8e5813595131843`;
+- asset `VolaFlex-dev.apk` pubblicato su `dev-latest`;
+- size asset: 9,867,651 byte.
+
 ---
 
 # 12. Stato roadmap
@@ -434,7 +453,7 @@ Consumo reale:
 
 ## v2.3 — N notti / ±X giorni
 
-**IMPLEMENTATA SUL BRANCH TECNICO; CI E TEST TELEFONO DA VALIDARE.**
+**IMPLEMENTATA, CI VERDE E RELEASE PUBBLICATA; DA VALIDARE SUL TELEFONO.**
 
 ### UI
 
@@ -514,6 +533,10 @@ Nuovo tipo:
 
 Ogni blocco registra SUCCESS / EMPTY / ERROR senza API key.
 
+### CI v2.3
+
+Run #22 SUCCESS, build `0.1.0-dev.22`, firma persistente invariata e Release `dev-latest` aggiornata. Il test runtime resta necessario per validare la migrazione Room 2→3, la scelta strategia e il consumo reale.
+
 ---
 
 # 13. Prossimi step dopo v2.3
@@ -544,9 +567,13 @@ Dopo validazione reale v2.3:
 
 # 15. Prossimo milestone operativo
 
-1. completare CI della build v2.3;
-2. installare sopra la build corrente senza disinstallare;
-3. verificare migrazione Room 2→3 senza perdita di impostazioni/cache/diagnostica;
-4. testare prima il ramo **SerpApi sample**, perché SearchAPI.io non è ancora configurata;
-5. ripetere la stessa ricerca entro 4h e verificare 0 nuove query;
-6. in un secondo momento configurare SearchAPI.io e testare il ramo Calendar su un nuovo set di parametri.
+1. installare **`0.1.0-dev.22`** sopra la build corrente senza disinstallare;
+2. verificare che Impostazioni/API key e Diagnostica pregresse siano ancora presenti, validando Room 2→3;
+3. **non configurare ancora SearchAPI.io**: testare prima il fallback SerpApi campionato;
+4. test consigliato: `FCO → MAD`, **3 notti**, target **15/12/2026**, **±5 giorni**;
+5. ±5 produce 11 partenze candidate, quindi senza SearchAPI.io deve scegliere `SERP_SAMPLE`;
+6. consumo previsto: **5–7 query SerpApi**, Account API gratuita, **0 SearchAPI.io**;
+7. la data ritorno vincente deve essere esattamente 3 giorni dopo l'andata;
+8. Diagnostica: `SERPAPI_ACCOUNT` + `GOOGLE_FLIGHTS`, nessun `SEARCHAPI_CALENDAR`;
+9. ripetizione identica entro 4h: `CACHE HIT`, **0 query provider**;
+10. solo dopo PASS del fallback, configurare SearchAPI.io e usare un nuovo set >10 date per validare Calendar + 1 verifica SerpApi precisa.
