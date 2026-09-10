@@ -8,30 +8,26 @@
 
 ## Regola di manutenzione
 
-Aggiornare questo file ogni volta che cambia un requisito, una decisione architetturale, una tecnologia, una policy API/quota o lo stato reale. `SESSION_HANDOFF.md` contiene lo stato operativo sintetico da leggere all'inizio di una nuova chat.
+Aggiornare questo file dopo ogni requisito/decisione/modifica/step completato. `SESSION_HANDOFF.md` contiene il riepilogo operativo sintetico per riprendere il lavoro in una nuova chat.
 
 ---
 
 # 1. Obiettivo e vincoli permanenti
 
-VolaFlex è un'app Android personale per trovare voli economici con forte supporto a date flessibili, weekend, multi-aeroporto, geografia avanzata e filtri sugli scali.
+VolaFlex è un'app Android personale per trovare voli economici con date flessibili, weekend, multi-aeroporto, geografia avanzata e futuri filtri sugli scali.
 
 Vincoli permanenti:
 
-- uso personale e distribuzione APK via sideload;
-- niente Play Store per ora;
-- **zero costi**;
-- **nessuna carta di credito/debito**;
+- uso personale, APK sideload, niente Play Store per ora;
+- **zero costi** e **nessuna carta di credito/debito**;
 - niente backend/server a pagamento;
-- sviluppo GitHub-only;
-- repository GitHub privata;
-- nessun Android Studio locale;
-- GitHub Actions per CI/build;
-- GitHub Releases per distribuire l'APK;
-- GitHub Codespaces opzionale;
+- sviluppo GitHub-only, repository privata;
+- niente Android Studio locale;
+- GitHub Actions per CI/build e GitHub Releases per APK;
+- Codespaces opzionale;
 - test runtime/UI su telefono Android reale;
-- nessuna API key o segreto nel repository/chat;
-- proprietario del progetto principiante assoluto.
+- nessuna API key/keystore/password nel repository o in chat;
+- proprietario principiante assoluto: mantenere workflow semplici e verificabili.
 
 ---
 
@@ -39,15 +35,14 @@ Vincoli permanenti:
 
 1. Weekend flessibili: partenza venerdì sera oppure sabato mattina; ritorno domenica sera oppure lunedì.
 2. N notti: origine + destinazione + numero esatto di notti, data target con ±X giorni; trovare il periodo più economico.
-3. Data target ±X giorni.
-4. Range ampi di date evitando brute force quando esistono metodi più efficienti.
-5. Multi-origine fino a 3 alternative.
-6. Destinazione singola, fino a 3 aeroporti alternativi, Ovunque oppure intero paese.
-7. Esclusione paese di scalo.
-8. Stessa compagnia operativa su tutti i segmenti quando richiesto.
-9. Durata massima scalo.
-10. Dettaglio scalo: aeroporto, città, paese, durata, overnight.
-11. Scali >8h: pulsante Maps via Android Intent; niente Maps SDK.
+3. Range ampi senza brute force inutile.
+4. Multi-origine fino a 3 aeroporti.
+5. Destinazione: singolo aeroporto, fino a 3 aeroporti alternativi, Ovunque oppure intero paese.
+6. Esclusione paese di scalo.
+7. Stessa compagnia operativa su tutti i segmenti quando richiesto.
+8. Durata massima scalo.
+9. Dettaglio scalo: aeroporto, città, paese, durata, overnight.
+10. Scali >8h: pulsante Maps via Android Intent; niente Maps SDK.
 
 Per v3 la destinazione è una scelta esclusiva fra `Airports`, `Anywhere`, `Country`: **niente destinazioni composite** come lista aeroporti + paese nello stesso input.
 
@@ -65,18 +60,17 @@ Pattern dati:
 
 ## Discovery
 
-Ridurre il numero di query usando, a seconda del caso:
+Ridurre le query usando, secondo il caso:
 
 - SerpApi Google Travel Explore;
 - SearchAPI.io Google Flights Calendar;
-- Google Flights Deals quando pertinente;
 - query multi-aeroporto native;
 - cache locale;
 - campionamento euristico.
 
 ## Verifica
 
-Verificare solo pochi candidati migliori con Google Flights preciso.
+Verificare solo pochi candidati migliori con SerpApi Google Flights preciso.
 
 ## Dettaglio
 
@@ -88,24 +82,21 @@ Recuperare on-demand solo quando serve:
 - operating carrier/codeshare;
 - paese degli scali;
 - stessa compagnia;
-- dettaglio scalo;
 - Maps.
 
-Mai scaricare automaticamente il dettaglio completo di decine di risultati.
+## Protezione anti-esplosione combinatoria
 
-## Protezione anti-esplosione combinatoria v3
+Non eseguire il prodotto cartesiano ingenuo `origini × destinazioni × date × pattern`. Preferire:
 
-Non eseguire il prodotto cartesiano ingenuo `origini × destinazioni × date × pattern`. Preferire nell'ordine:
-
-1. parametri multi-airport nativi del provider;
+1. parametri multi-airport nativi;
 2. Explore per ridurre la geografia;
 3. Calendar per ridurre le date;
-4. verifica dei soli migliori 1–2 candidati;
+4. verifica solo dei migliori 1–2 candidati;
 5. Account API live prima dei batch;
 6. cache TTL 4h;
-7. diagnostica della strategia eseguita.
+7. diagnostica della strategia.
 
-v3.1 e v3.2 hanno validato end-to-end che Date fisse usa il multi-aeroporto nativo senza fan-out: più origini e più destinazioni restano una sola query Google Flights. v3.3 estende la stessa regola alla pipeline N notti: una query per data SerpApi o un blocco Calendar, indipendentemente dal numero di aeroporti nelle liste.
+v3.1/v3.2 hanno validato end-to-end che Google Flights gestisce più origini/destinazioni in una sola query. v3.3 estende la stessa logica alla pipeline N notti: una query per data SerpApi o un blocco Calendar, non `origini×destinazioni` query.
 
 ---
 
@@ -116,8 +107,8 @@ v3.1 e v3.2 hanno validato end-to-end che Date fisse usa il multi-aeroporto nati
 Ruoli:
 
 - `google_flights`: ricerche precise e verifiche finali;
-- `google_travel_explore`: Discovery economica per weekend/Ovunque/paesi/range ampi;
-- Google Flights Deals: Discovery quando il caso d'uso coincide con i suoi parametri.
+- `google_travel_explore`: Discovery economica per weekend/Ovunque/paesi;
+- Account API: quota live autorevole.
 
 ### Google Flights
 
@@ -125,61 +116,55 @@ Decisioni/API verificate:
 
 - `engine=google_flights`;
 - `type=1` round-trip;
-- `departure_id` accetta aeroporti multipli comma-separated;
-- `arrival_id` accetta aeroporti multipli comma-separated;
-- multi-origine + multi-destinazione può essere espresso nella stessa richiesta;
-- `outbound_date`, `return_date` in `YYYY-MM-DD`;
+- `departure_id` e `arrival_id` accettano più aeroporti/location comma-separated;
+- multi-origine + multi-destinazione può quindi stare nella stessa richiesta;
+- `outbound_date`, `return_date`: `YYYY-MM-DD`;
 - `outbound_times` / `return_times`: 2 o 4 ore intere 0–23 separate da virgola, es. `17,23`, `5,11`, `0,23`, `4,18,3,19`;
 - `layover_duration=MIN,MAX` in minuti;
-- `exclude_conns` per aeroporti di connessione;
+- `exclude_conns` per aeroporti connessione;
 - `include_airlines` / `exclude_airlines`;
 - stessa compagnia operativa: controllo Kotlin;
 - esclusione paese connessione: non nativa → lookup IATA→paese;
-- risposta: `best_flights` / `other_flights`, segmenti con `departure_airport.id/time`, `arrival_airport.id/time`;
-- origine effettiva dell'andata = `departure_airport.id` del primo segmento;
-- destinazione effettiva dell'andata = `arrival_airport.id` dell'ultimo segmento;
+- risultato andata in `best_flights` / `other_flights` con segmenti `departure_airport.id/time`, `arrival_airport.id/time`;
+- origine effettiva = primo segmento; destinazione effettiva = ultimo segmento;
 - dettaglio esatto del ritorno round-trip richiede una seconda richiesta con `departure_token`.
 
-Da v2.2 esiste `SerpApiTimeFilterGuard`: blocca localmente formati orari non validi prima della rete.
+Da v2.2 esiste `SerpApiTimeFilterGuard`, che blocca localmente filtri orari malformati prima della rete.
 
-### Account API / quota condivisa
+### Quota condivisa
 
-La chiave SerpApi è condivisa con un altro progetto personale; non creare un secondo account se richiede numero di telefono.
-
-Fonte autorevole della quota: Account API live. Non mantenere un contatore locale autorevole.
+La chiave SerpApi è condivisa con un altro progetto personale. Fonte autorevole: Account API live. Non mantenere un contatore locale autorevole.
 
 Regole:
 
 - >50: normale;
 - <=50: cache/risparmio più aggressivi;
-- <=20: forte prudenza/conferma futura per batch >5;
-- <=5: niente batch costoso automatico;
-- preservare una riserva minima di 5 query;
+- <=20: forte prudenza per batch >5;
+- <=5: niente batch automatico;
+- riserva minima: 5 query;
 - mai 30–40 chiamate automatiche con un tap.
 
-Account API è trattata come gratuita/non conteggiata nella quota normale, secondo documentazione verificata.
+Account API è trattata come gratuita/non conteggiata nella quota normale secondo docs verificate.
 
 ## 4.2 SearchAPI.io Calendar — acceleratore mirato
 
-Endpoint:
+Endpoint: `https://www.searchapi.io/api/v1/search?engine=google_flights_calendar`
 
-`GET https://www.searchapi.io/api/v1/search?engine=google_flights_calendar`
-
-Ruolo: date-discovery accelerator per N notti / ±X e range ampi.
+Ruolo: discovery date per N notti / ±X.
 
 Regole:
 
-- SearchAPI.io è opzionale architetturalmente; chiave attualmente configurata sul telefono;
+- chiave opzionale architetturalmente; attualmente configurata sul telefono;
 - `departure_id` e `arrival_id` supportano più aeroporti/location comma-separated;
-- massimo circa 200 combinazioni round-trip per richiesta;
-- blocco scelto: massimo 14 partenze perché `14×14=196`, mentre `15×15=225`;
+- limite noto ~200 combinazioni date round-trip per richiesta;
+- max side scelto 14 perché `14×14=196`, mentre `15×15=225`;
 - per N notti si filtra localmente la diagonale `return = departure + N`;
-- oltre 10 date, se chiave disponibile: Calendar → 1 verifica SerpApi precisa;
-- senza chiave e >10 date: campionamento SerpApi 5 date + fino a 2 vicine;
-- ≤10 date: SerpApi esaustiva;
-- da v3.3 le liste multi-aeroporto vengono passate direttamente al Calendar e non moltiplicano il numero dei blocchi temporali.
+- ≤10 partenze candidate: SerpApi esaustiva;
+- >10 + SearchAPI configurata: Calendar → 1 verifica SerpApi;
+- >10 senza SearchAPI: SerpApi sampling 5 + fino a 2 vicine;
+- da v3.3 le liste multi-aeroporto vengono passate direttamente al Calendar e non moltiplicano i blocchi.
 
-Esempi Calendar:
+Esempi temporali:
 
 - ±5 → 11 partenze → 1 Calendar;
 - ±7 → 15 → 2 Calendar;
@@ -194,48 +179,37 @@ Uso:
 - `engine=google_travel_explore`;
 - `travel_duration=1` = Weekend;
 - `departure_id` supporta origini multiple comma-separated;
-- `arrival_id` può restringere a destinazione specifica;
-- “Ovunque”: omettere `arrival_id` e `arrival_area_id`;
-- paese/area: usare `arrival_area_id` con KGMID.
+- `arrival_id` per destinazione specifica;
+- Ovunque: omettere `arrival_id` e `arrival_area_id`;
+- paese/area: `arrival_area_id` con KGMID.
 
-### Rischio provider Explore — importante per v3.4/v3.5
+### Rischio provider Explore — obbligatorio per v3.4/v3.5
 
-La cronologia ufficiale dei release notes 2026 mostra bug/fix recenti su filtri e risultati:
+Release notes ufficiali 2026 mostrano fix recenti su:
 
-- gennaio 2026: correzione del comportamento `travel_duration` Weekend;
-- febbraio 2026: correzione di `max_duration` ignorato;
-- marzo 2026: correzione di `stops` ignorato;
-- **09/07/2026:** correzione di un problema per cui la maggior parte delle ricerche valide poteva restituire risultati vuoti.
+- gennaio: Weekend `travel_duration`;
+- febbraio: `max_duration` ignorato;
+- marzo: `stops` ignorato;
+- **09/07/2026:** molte ricerche valide potevano tornare vuote.
 
-Decisione obbligatoria per v3.4/v3.5: implementare gestione robusta di risposte vuote/anomale. Una risposta Explore vuota non va trattata automaticamente come prova certa di “nessuna opportunità”; registrare diagnostica, distinguere HTTP/body/error/struttura anomala e mostrare un messaggio prudente quando il provider sembra non affidabile.
+Decisione: v3.4/v3.5 devono trattare risposte vuote/anomale con diagnostica robusta, distinguendo quando possibile HTTP error, body mancante, errore esplicito, struttura inattesa e assenza reale di opportunità. Non interpretare automaticamente un Explore vuoto come “nessun volo”.
 
-## 4.4 Mapping preset da non confondere
+### Mapping preset da non confondere
 
-Travel Explore:
-
-- `1` Weekend;
-- `2` 1 week;
-- `3` 2 weeks.
-
-Google Flights Deals:
-
-- `1` 1 week;
-- `2` Weekend;
-- `3` 2 weeks.
-
-`price_insights` non è un calendario ±X: descrive statisticamente stessa rotta/date.
+Travel Explore: `1 Weekend`, `2 1 week`, `3 2 weeks`.
+Google Flights Deals: `1 1 week`, `2 Weekend`, `3 2 weeks`.
 
 ---
 
 # 5. Credenziali API e sicurezza
 
-API key salvate localmente con DataStore Preferences; mai nel repository/chat; `android:allowBackup=false`.
+API key salvate localmente con DataStore Preferences; mai repo/chat; `android:allowBackup=false`.
 
-- SerpApi: obbligatoria per ricerche reali;
-- SearchAPI.io: opzionale architetturalmente e attualmente configurata;
-- UI mostra soltanto configurata/non configurata;
+- SerpApi obbligatoria per ricerche reali;
+- SearchAPI.io opzionale ma attualmente configurata;
+- UI mostra configurata/non configurata;
 - campi password-style;
-- campo vuoto al salvataggio mantiene il valore esistente.
+- campo vuoto al salvataggio conserva il valore esistente.
 
 DataStore non cifra autonomamente a riposo; rischio accettato per app personale nello storage privato Android.
 
@@ -243,44 +217,29 @@ DataStore non cifra autonomamente a riposo; rischio accettato per app personale 
 
 # 6. Geografia locale
 
-## 6.1 AirportDirectory
+## AirportDirectory
 
-File:
-
-`data/local/AirportDirectory.kt`
+File `data/local/AirportDirectory.kt`.
 
 Mapping:
 
 `IATA → nome aeroporto → città → ISO country`
 
-Copertura iniziale: circa 180–200 aeroporti principali, Europa + Nord Africa + destinazioni comuni.
+Circa 180–200 aeroporti principali, Europa + Nord Africa + destinazioni comuni.
 
 Usi attivi:
 
-- guard anti-typo prima della rete;
+- guard anti-typo;
 - classificazione geografica;
-- validazione di ogni elemento delle liste multi-origine e multi-destinazione su Date fisse e N notti.
+- validazione di ogni aeroporto su Date fisse e N notti multi-aeroporto.
 
-Usi futuri:
+Codice sconosciuto: warning `Correggi` / `Cerca comunque`; con `Correggi` nessuna query.
 
-- paese scali;
-- autocomplete;
-- filtro paese scalo.
+## CountryAreaCatalog — futuro v3.5
 
-Codice sconosciuto: warning `Correggi` / `Cerca comunque`, senza query automatica. Test `FC0`: PASS, 0 query.
+Per `arrival_area_id` l'ISO country non basta: Explore richiede KGMID. Piano: catalogo statico locale `nome + ISO2 + KGMID`, almeno Europa/Nord Africa/destinazioni comuni, zero rete/costo.
 
-## 6.2 CountryAreaCatalog — futuro v3.5
-
-Per `arrival_area_id` il mapping IATA→ISO non basta: Explore richiede KGMID.
-
-Piano approvato:
-
-- catalogo statico locale `CountryAreaCatalog`;
-- nome paese + ISO-2 + KGMID;
-- almeno Europa + Nord Africa + destinazioni comuni;
-- zero rete e zero costo.
-
-## 6.3 Modello geografico v3 approvato
+## Modello geografico v3 approvato
 
 - `OriginSelection.Airports(List<IATA>)`, max 3;
 - `DestinationSelection.Airports(List<IATA>)`, max 3;
@@ -289,63 +248,59 @@ Piano approvato:
 
 Le modalità destinazione sono alternative, non composite.
 
-v3.1/v3.2 implementano `Airports(max 3)` sui due assi di Date fisse. v3.3 riusa lo stesso modello nella modalità N notti. Il sealed model geografico generale potrà essere formalizzato quando verranno aggiunti Anywhere/Country.
-
 ---
 
 # 7. Cache Room e Diagnostica
 
-Database: `volaflex.db`.
-
-Schema corrente: **versione 3**.
+Database `volaflex.db`, schema corrente **3**.
 
 Tabelle:
 
-- `flight_search_cache` — date fisse;
-- `weekend_search_cache` — weekend;
+- `flight_search_cache` — Date fisse;
+- `weekend_search_cache` — Weekend;
 - `nights_search_cache` — N notti / ±X;
 - `diagnostic_events`.
 
-TTL cache ricerche: **4 ore**.
+TTL cache: **4 ore**.
 
-Migrazioni validate:
+Migrazioni validate sul telefono:
 
-- 1→2: `weekend_search_cache`;
-- 2→3: `nights_search_cache`.
+- 1→2 Weekend;
+- 2→3 N notti.
 
-### Date fisse multi-aeroporto — v3.1/v3.2
+## Date fisse multi-aeroporto — v3.1/v3.2
 
-Nessuna migrazione Room necessaria.
-
-Cache key:
-
-`origini canonicalizzate + destinazioni canonicalizzate + data andata + data ritorno`
-
-Sia origini sia destinazioni vengono normalizzate, deduplicate e ordinate alfabeticamente. `flight_search_cache.departureId` e `.arrivalId` memorizzano la coppia effettiva vincente.
-
-### N notti multi-aeroporto — v3.3
-
-Nessuna migrazione Room necessaria; schema resta 3.
+Nessuna migrazione Room.
 
 Cache key:
 
-`NIGHTS | origini canonicalizzate | destinazioni canonicalizzate | N notti | target | ±X | strategia`
+`origini canonicalizzate | destinazioni canonicalizzate | andata | ritorno`
 
-Le strategie rimangono:
+Canonicalizzazione: trim, uppercase, dedup, sort alfabetico.
+
+`flight_search_cache.departureId` / `.arrivalId` memorizzano la coppia effettiva vincente.
+
+## N notti multi-aeroporto — v3.3
+
+Nessuna migrazione Room; schema resta 3.
+
+Cache key:
+
+`NIGHTS | origini canonicalizzate | destinazioni canonicalizzate | N | target | ±X | strategia`
+
+Strategie:
 
 - `SERP_EXHAUSTIVE`;
 - `SERP_SAMPLE`;
 - `SEARCHAPI_CALENDAR`.
 
-Questo evita collisioni fra strategie e rende equivalenti ordini diversi delle stesse liste. I campi stringa `nights_search_cache.departureId` / `.arrivalId` contengono le liste canonicalizzate richieste. La coppia effettiva vincente è salvata nel JSON del risultato.
+I campi stringa esistenti `nights_search_cache.departureId` / `.arrivalId` memorizzano le liste canonicalizzate richieste. La coppia effettiva vincente è nel JSON risultato.
 
-`NightsSearchResult` aggiunge `departureAirportId` e `arrivalAirportId` con default retrocompatibili, quindi vecchie cache JSON prive dei campi restano decodificabili.
+`NightsSearchResult` da v3.3 aggiunge `departureAirportId` e `arrivalAirportId` con default retrocompatibili, così vecchi JSON cache restano decodificabili.
 
-### Diagnostica
+## Diagnostica
 
-Conserva gli ultimi 20 eventi.
-
-Tipi correnti:
+Conserva gli ultimi 20 eventi. Tipi:
 
 - `SERPAPI_ACCOUNT`;
 - `GOOGLE_FLIGHTS`;
@@ -355,52 +310,44 @@ Tipi correnti:
 - `CACHE`;
 - `QUOTA_GUARD`.
 
-Nessuna API key nei log. `Copia diagnostica` disponibile.
+Nessuna API key nei log; `Copia diagnostica` disponibile.
 
-Da v3.3 gli eventi N notti includono `origins=<lista>`, `destinations=<lista>` e, per Google Flights con risultato, `winner=<origine>→<destinazione>`.
+Da v3.3 gli eventi N notti includono `origins=<lista>`, `destinations=<lista>` e, sui risultati Google Flights, `winner=<origine>→<destinazione>`.
 
 ---
 
-# 8. Modelli dati principali
+# 8. Modelli dati correnti
 
-## Correnti
+### SimpleFlightResult
 
-### `SimpleFlightResult`
+Date fisse: prezzo/valuta/compagnia/orari/scali/quota/cache + origine e destinazione effettive.
 
-Include origine/destinazione effettive, prezzo, valuta, compagnia/e, orari andata, scali, quota e cache metadata.
+### WeekendCandidate / VerifiedWeekendResult
 
-### `WeekendCandidate`
+Discovery Explore e risultato weekend verificato v2.2.
 
-Discovery indicativa Travel Explore.
-
-### `VerifiedWeekendResult`
-
-Risultato v2.2 verificato con pattern/date/prezzo/compagnia/orari/scali andata/fascia ritorno/quota/cache.
-
-### `NightsSearchResult`
+### NightsSearchResult
 
 Da v3.3 include:
 
 - date andata/ritorno e N notti;
 - prezzo/valuta;
-- compagnia, orari e scali andata;
-- **origine effettiva** dal primo segmento;
-- **destinazione effettiva** dall'ultimo segmento;
+- compagnia/orari/scali andata;
+- **origine effettiva**;
+- **destinazione effettiva**;
 - target ±X;
-- strategia;
-- numero date candidate/valutate;
-- prezzo indicativo Calendar quando presente;
-- conteggi richieste provider;
+- strategia e label;
+- date candidate/valutate;
+- prezzo Calendar indicativo quando presente;
+- conteggi provider;
 - quota SerpApi;
 - metadata cache.
 
-## Futuri
-
-`FlightItinerary`, `FlightSegment`, `Layover` rimangono il modello finale per Dettaglio e v4.
+Futuri: `FlightItinerary`, `FlightSegment`, `Layover` per Dettaglio/v4.
 
 ---
 
-# 9. Stack tecnologico corrente
+# 9. Stack corrente
 
 - Kotlin + Jetpack Compose;
 - AGP 9.3.1;
@@ -420,7 +367,7 @@ Da v3.3 include:
 - minSdk 26;
 - JDK 17.
 
-AGP 9.x usa Kotlin integrato: non applicare `org.jetbrains.kotlin.android`.
+AGP 9 usa Kotlin integrato: non applicare `org.jetbrains.kotlin.android`.
 
 ---
 
@@ -428,7 +375,7 @@ AGP 9.x usa Kotlin integrato: non applicare `org.jetbrains.kotlin.android`.
 
 Workflow:
 
-`GitHub → Actions → Gradle → assembleRelease → zipalign → apksigner → GitHub Release → telefono`
+`GitHub → Actions → Gradle → assembleRelease → zipalign → apksigner → dev-latest → telefono`
 
 Release sviluppo:
 
@@ -436,29 +383,19 @@ Release sviluppo:
 - titolo `VolaFlex - Development latest`;
 - asset `VolaFlex-dev.apk`.
 
-`PROJECT_SPEC.md`, `SESSION_HANDOFF.md` e `.github/workflows/android-build.yml` sono esclusi dal trigger push.
+Docs e workflow sono esclusi dal trigger push.
 
-Firma persistente canonica:
+Firma canonica:
 
 `a1f432f512e3d1867ee4b4535fb06a83fae5413ee700113b34e8b926a2767df3`
 
-Signer:
+Signer `CN=VolaFlex, OU=Personal, O=archimede-projects`, RSA4096.
 
-`CN=VolaFlex, OU=Personal, O=archimede-projects`
+CI principali recenti:
 
-RSA4096. Keystore con doppio backup personale.
-
-### CI v3.1
-
-Run #23 SUCCESS, versione `0.1.0-dev.23`, fingerprint invariato.
-
-### CI v3.2
-
-Run #24 SUCCESS, versione `0.1.0-dev.24`, commit applicativo `766fe25e9c25e5395c1905ff2337d443b28739b9`, `BUILD SUCCESSFUL in 2m 9s`, APK SHA-256 `edd5ff433f7b5d399ce1eb4778643872b822f1da849dc8169b28559906161265`, fingerprint invariato.
-
-### CI v3.3
-
-Implementazione su `main` al commit applicativo `8ebfa88085d8db9a9240fe91b919df02adfa137a`. Run #25 avviato; aggiornare qui a SUCCESS/firma/Release solo dopo chiusura verde.
+- v3.1 run #23 SUCCESS, `0.1.0-dev.23`;
+- v3.2 run #24 SUCCESS, `0.1.0-dev.24`, APK SHA-256 `edd5ff433f7b5d399ce1eb4778643872b822f1da849dc8169b28559906161265`;
+- **v3.3 run #25 SUCCESS**, build **`0.1.0-dev.25`**, commit applicativo `8ebfa88085d8db9a9240fe91b919df02adfa137a`, `BUILD SUCCESSFUL in 2m 13s`, 49 task; KSP/compile/lint/assembleRelease, zipalign, firma e pubblicazione `dev-latest` tutti verdi; v2/v3 signature true, signer count 1, fingerprint canonico invariato; APK SHA-256 **`12ca144a1fdfcb5adfbf30d36b16e3fdf8a402d17762b078b44cb93be2c76084`**, asset size **9,884,035 byte**.
 
 ---
 
@@ -466,125 +403,103 @@ Implementazione su `main` al commit applicativo `8ebfa88085d8db9a9240fe91b919df0
 
 ## Fase 0 — Infrastruttura
 
-**CHIUSA 100% E VALIDATA.**
-
-CI, Release, firma persistente e upgrade reale senza disinstallazione validati.
+**CHIUSA 100% E VALIDATA.** CI, Release, firma persistente e upgrade senza disinstallazione validati.
 
 ## v1 — Fondamenta
 
-**CHIUSA E VALIDATA 100% SUL TELEFONO.**
+**CHIUSA E VALIDATA 100% SUL TELEFONO.** API key locali, prima ricerca reale, IATA guard, Room cache 4h, Diagnostica/clipboard.
 
-Include API key locali, prima ricerca reale, IATA guard, cache Room 4h, Diagnostica/clipboard.
-
-Test storico: `FCO→MAD`, 16–19/10/2026, Ryanair 104 EUR, 0 scali andata. Round finale IATA/cache/diagnostica: 1 query osservata, coerente con la stima.
+Test storico: `FCO→MAD`, 16–19/10/2026, Ryanair 104 EUR, 0 scali. Round IATA/cache/diagnostica: 1 query osservata = stima.
 
 ## v2 — Date flessibili
 
-**COMPLETAMENTE CHIUSA E VALIDATA SUL TELEFONO REALE — 2026-09-10.**
+**COMPLETAMENTE CHIUSA E VALIDATA.**
 
-### v2.1 Weekend Discovery — PASS
-
-`FCO→MAD`, ottobre 2026, Explore 01/10→05/10, 95 EUR, 1 query, cache PASS.
-
-### v2.2 Weekend Verifica precisa — PASS
-
-`FCO→MAD`, novembre 2026: Explore 57 EUR → Pattern B Wizz Air 54 EUR, partenza 06:00 dentro `5,11`, 0 scali; 3 query iniziali e 0 replay.
-
-### v2.3 N notti ramo SerpApi — PASS
-
-`FCO→MAD`, 3 notti, target 25/10/2026, ±5: 11 candidate, 7 valutate; Ryanair 28→31/10, 53 EUR, 06:25→09:00, 0 scali; replay cache 0.
-
-### v2.3 N notti ramo SearchAPI.io Calendar — PASS
-
-Ramo Calendar + verifica SerpApi e cache validati sul telefono reale.
-
-**Conclusione: v2 CHIUSA.**
+- v2.1 Weekend Discovery: `FCO→MAD`, ottobre 2026, Explore 01→05/10, 95 EUR, 1 query, cache PASS; evidenziato limite 4 notti del preset Explore.
+- v2.2 Weekend Verifica: novembre 2026, Explore 57 EUR → Pattern B Wizz Air 54 EUR, partenza 06:00 dentro `5,11`, 0 scali; 3 query e replay 0.
+- v2.3 N notti SerpApi: `FCO→MAD`, 3 notti, target 25/10, ±5, 11 candidate/7 valutate; Ryanair 28→31/10, 53 EUR, 06:25→09:00, 0 scali; replay 0.
+- v2.3 SearchAPI Calendar: ramo Calendar + verifica SerpApi + cache validati sul telefono.
 
 ## v3 — Geografia avanzata
 
 Sequenza approvata:
 
-1. v3.1 Multi-origine — Date fisse;
-2. v3.2 Multi-destinazione + 3×3 — Date fisse;
-3. **v3.3 Multi-aeroporto — N notti**;
-4. v3.4 Anywhere — Discovery;
-5. v3.5 Country — Discovery;
-6. v3.6 Anywhere/Country — Verifica Weekend;
+1. v3.1 Multi-origine Date fisse;
+2. v3.2 Multi-destinazione Date fisse;
+3. **v3.3 Multi-aeroporto N notti**;
+4. v3.4 Anywhere Discovery;
+5. v3.5 Country Discovery;
+6. v3.6 Anywhere/Country Verifica Weekend;
 7. v3.7 integrazioni estreme + hardening.
 
-### v3.1 — Multi-origine Date fisse
+### v3.1 — CHIUSA E VALIDATA
 
-**CHIUSA E VALIDATA SUL TELEFONO REALE.**
+Test `FCO+CIA+MXP→MAD`, 20–23/11/2026: 1 query, vincitore **MXP**, **60 EUR**; replay origini riordinate = CACHE HIT, 0 query.
 
-Test reale: `FCO + CIA + MXP → MAD`, 20/11/2026→23/11/2026, 1 query Google Flights, vincitore **MXP**, **60 EUR**. Replay con origini riordinate → CACHE HIT, 0 query.
+### v3.2 — CHIUSA E VALIDATA
 
-### v3.2 — Multi-destinazione Date fisse
+Test reali PASS:
 
-**CHIUSA E VALIDATA SUL TELEFONO REALE — 2026-09-10.**
+- UI multi-destinazione;
+- blocco duplicati destinazione;
+- blocco overlap origine/destinazione;
+- live `FCO+CIA → BCN+MAD+VLC`: **1 sola Google Flights**, vincitore **FCO→BCN**, **48 EUR**;
+- Diagnostica conferma liste canonicalizzate e una sola richiesta;
+- replay con entrambi gli assi riordinati → **CACHE HIT**, 0 nuove query.
 
-Test completi PASS:
-
-- UI multi-destinazione add/remove/max 3;
-- duplicati destinazione bloccati localmente;
-- sovrapposizione origine/destinazione bloccata localmente;
-- live `FCO + CIA → BCN + MAD + VLC` su date fisse;
-- **1 sola query Google Flights** nonostante 2×3 aeroporti;
-- vincitore **FCO→BCN**;
-- prezzo **48 EUR**;
-- Diagnostica ha confermato liste canonicalizzate e una sola richiesta;
-- replay con origini E destinazioni riordinate → **CACHE HIT**, 0 nuove query.
-
-**Conclusione: canonicalizzazione multi-aeroporto su entrambi gli assi validata end-to-end.**
-
-### v3.3 — Multi-aeroporto dentro N notti/±X
-
-**IMPLEMENTATA SU MAIN; CI/TEST TELEFONO DA CHIUDERE.**
+### v3.3 — IMPLEMENTATA + CI VERDE, TEST TELEFONO PENDENTE
 
 Scope implementato e solo questo:
 
-- modalità N notti con 1–3 origini e 1–3 destinazioni;
-- UI add/remove coerente con Date fisse;
-- IATA guard su ogni elemento;
-- duplicati bloccati per ciascun asse;
+- `N notti` con 1–3 origini e 1–3 destinazioni;
+- UI add/remove uguale al pattern validato di Date fisse;
+- IATA guard su ogni aeroporto;
+- duplicati bloccati per asse;
 - sovrapposizione origine/destinazione vietata;
-- canonicalizzazione trim/uppercase/dedup/sort su entrambi gli assi;
-- SerpApi esaustivo: liste comma-separated, una query per data;
-- fallback senza SearchAPI: stesso campionamento 5 + fino a 2 vicine, sempre con liste aggregate;
-- SearchAPI.io Calendar: liste comma-separated, chunking temporale max 14×14=196 invariato;
-- verifica Calendar finale: 1 SerpApi Google Flights con le stesse liste;
-- cache key include origini, destinazioni, N notti, target, ±X e strategia;
-- risultato mostra origine e destinazione effettive vincenti;
-- nessuna migrazione Room e nessuna modifica a Weekend/Explore/Anywhere/Country.
+- canonicalizzazione su entrambi gli assi;
+- SerpApi exact: liste comma-separated, una query per data;
+- fallback senza SearchAPI: stesso 5+2, sempre con liste aggregate;
+- SearchAPI Calendar: liste comma-separated e chunking temporale 14×14 invariato;
+- verifica finale Calendar: 1 Google Flights con le stesse liste;
+- cache key include origini, destinazioni, N, target, ±X, strategia;
+- risultato mostra origine e destinazione effettive;
+- nessuna migrazione Room;
+- nessuna modifica a Weekend/Explore/Anywhere/Country.
 
-**Non avanzare a v3.4 finché v3.3 non è validata sul telefono.**
+Test telefono pianificati:
+
+**A — SerpApi esaustivo:** `FCO+CIA → BCN+VLC`, 3 notti, target **10/12/2026**, ±1 = 3 candidate. Attesi max 3 Google Flights, zero SearchAPI. Replay con `CIA+FCO → VLC+BCN`, parametri identici → CACHE HIT, 0 query.
+
+**B — Calendar:** `FCO+CIA → MAD+BCN+VLC`, 3 notti, target **15/01/2027**, ±7 = 15 candidate. Attesi 2 SearchAPI Calendar (14+1) + 1 SerpApi Google Flights finale. Replay con entrambe le liste riordinate e parametri identici → CACHE HIT, 0 query.
+
+Il fallback multi-aeroporto `SERP_SAMPLE` non viene ritestato apposta con 5–7 query: usa la stessa funzione exact-date multi-list del ramo esaustivo e l'algoritmo 5+2 già validato in v2; spendere quota aggiuntiva sarebbe duplicativo salvo anomalia.
+
+**Non avanzare a v3.4 finché i test v3.3 non sono PASS.**
 
 ---
 
-# 12. Rischi noti e accettati
+# 12. Rischi noti
 
 - provider possono cambiare JSON/parametri o avere downtime;
-- SerpApi e SearchAPI.io dipendono dall'ecosistema Google Flights;
-- quota SerpApi è limitata e condivisa;
-- SearchAPI.io free pool può essere limitato/one-time;
-- ricerca euristica senza Calendar non è matematicamente esaustiva;
+- SerpApi/SearchAPI dipendono dall'ecosistema Google Flights;
+- quota SerpApi limitata e condivisa;
+- SearchAPI free pool limitato;
+- sampling senza Calendar non è matematicamente esaustivo;
 - perdita keystore impedisce aggiornamenti con stessa identità;
-- DataStore non cifra autonomamente le API key a riposo;
+- DataStore non cifra autonomamente a riposo;
 - AirportDirectory non è esaustiva;
-- per i paesi serve un catalogo KGMID aggiuntivo;
-- liste multi-airport richiedono canonicalizzazione cache su entrambi gli assi e su ogni strategia temporale;
-- Explore è Discovery, non garantisce da solo vincoli precisi;
-- **Explore ha avuto regressioni/fix recenti nel 2026, incluse risposte vuote per ricerche valide: v3.4/v3.5 devono implementare error handling/diagnostica particolarmente robusti**;
-- dettaglio preciso ritorno via `departure_token` resta on-demand;
-- combinazioni geografiche estreme richiedono controllo quota e non brute force.
+- paesi richiedono catalogo KGMID;
+- liste multi-airport richiedono cache canonicalizzata su entrambi gli assi e strategia;
+- Explore è Discovery e ha avuto regressioni recenti nel 2026;
+- dettaglio ritorno via `departure_token` resta on-demand;
+- combinazioni estreme devono restare protette da quota/cache e non brute force.
 
 ---
 
 # 13. Prossimo milestone operativo
 
-1. Attendere/verificare CI v3.3 #25 e pubblicazione Release firmata.
-2. Testare sul telefono il ramo SerpApi esaustivo N notti con 2 origini + 2/3 destinazioni e un range piccolo.
-3. Verificare origine/destinazione effettive, numero query e Diagnostica.
-4. Riordinare entrambi gli assi e verificare cache hit della stessa strategia.
-5. Testare separatamente il ramo SearchAPI Calendar con >10 date candidate e liste multi-aeroporto.
-6. Verificare 2 Calendar + 1 SerpApi finale nel caso ±7 e replay cache a 0 query.
-7. Se entrambi PASS, segnare v3.3 CHIUSA e solo allora implementare v3.4 Anywhere.
+1. Installare `0.1.0-dev.25` sopra la build corrente, senza disinstallare.
+2. Eseguire Test A SerpApi esaustivo multi-aeroporto e replay canonicalizzato.
+3. Eseguire Test B Calendar multi-aeroporto e replay canonicalizzato.
+4. Verificare origine/destinazione effettive e Diagnostica per entrambi.
+5. Se PASS, segnare v3.3 CHIUSA e solo allora implementare v3.4 Anywhere.
