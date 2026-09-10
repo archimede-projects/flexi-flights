@@ -60,6 +60,10 @@ class ApiKeyStore(private val context: Context) {
         return keys.first().serpApiKey?.trim()?.takeIf { it.isNotEmpty() }
     }
 
+    suspend fun getSearchApiKey(): String? {
+        return keys.first().searchApiKey?.trim()?.takeIf { it.isNotEmpty() }
+    }
+
     suspend fun saveKeys(
         serpApiKeyInput: String,
         searchApiKeyInput: String
