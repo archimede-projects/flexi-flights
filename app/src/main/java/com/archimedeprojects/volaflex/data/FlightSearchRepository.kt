@@ -5,15 +5,18 @@ import com.archimedeprojects.volaflex.data.local.FlightSearchCacheEntity
 import com.archimedeprojects.volaflex.data.network.FlightOptionDto
 import com.archimedeprojects.volaflex.data.network.SerpApiService
 import java.io.IOException
+import java.util.Locale
 import kotlinx.serialization.SerializationException
 
 private const val MIN_SEARCHES_LEFT_TO_PROCEED = 5
 private const val CACHE_TTL_MILLIS = 4L * 60L * 60L * 1000L
+private const val MAX_FIXED_DATE_ORIGINS = 3
 
 data class SimpleFlightResult(
     val price: Int,
     val currency: String,
     val airlines: String,
+    val departureAirportId: String,
     val departureTime: String,
     val arrivalTime: String,
     val stops: Int,
@@ -39,16 +42,29 @@ class FlightSearchRepository(
 
     suspend fun searchRoundTrip(
         apiKey: String,
-        departureId: String,
+        departureIds: List<String>,
         arrivalId: String,
         outboundDate: String,
         returnDate: String,
         forceRefresh: Boolean = false
     ): FlightSearchOutcome {
-        val normalizedDeparture = departureId.trim().uppercase()
-        val normalizedArrival = arrivalId.trim().uppercase()
+        val normalizedDepartures = departureIds
+            .map { it.trim().uppercase(Locale.ROOT) }
+            .filter { it.isNotBlank() }
+            .distinct()
+            .sorted()
+
+        if (normalizedDepartures.isEmpty()) {
+            return FlightSearchOutcome.Error("Inserisci almeno un aeroporto di partenza.")
+        }
+        if (normalizedDepartures.size > MAX_FIXED_DATE_ORIGINS) {
+            return FlightSearchOutcome.Error("Per ora puoi usare al massimo 3 aeroporti di partenza.")
+        }
+
+        val normalizedDepartureQuery = normalizedDepartures.joinToString(",")
+        val normalizedArrival = arrivalId.trim().uppercase(Locale.ROOT)
         val cacheKey = buildCacheKey(
-            normalizedDeparture,
+            normalizedDepartureQuery,
             normalizedArrival,
             outboundDate,
             returnDate
@@ -65,7 +81,7 @@ class FlightSearchRepository(
                 diagnostics.log(
                     requestType = "CACHE",
                     outcome = "HIT",
-                    message = "$normalizedDeparture→$normalizedArrival $outboundDate/$returnDate"
+                    message = "origins=$normalizedDepartureQuery→$normalizedArrival $outboundDate/$returnDate"
                 )
                 return FlightSearchOutcome.Success(cached.toSimpleResult())
             }
@@ -95,7 +111,7 @@ class FlightSearchRepository(
         return try {
             val response = service.searchGoogleFlights(
                 engine = "google_flights",
-                departureId = normalizedDeparture,
+                departureId = normalizedDepartureQuery,
                 arrivalId = normalizedArrival,
                 outboundDate = outboundDate,
                 returnDate = returnDate,
@@ -167,7 +183,6 @@ class FlightSearchRepository(
                 cacheDao.upsert(
                     result.toCacheEntity(
                         cacheKey = cacheKey,
-                        departureId = normalizedDeparture,
                         arrivalId = normalizedArrival,
                         outboundDate = outboundDate,
                         returnDate = returnDate,
@@ -181,7 +196,7 @@ class FlightSearchRepository(
                 requestType = "GOOGLE_FLIGHTS",
                 outcome = "SUCCESS",
                 httpStatus = response.code(),
-                message = "$normalizedDeparture→$normalizedArrival, ${result.price} ${result.currency}"
+                message = "origins=$normalizedDepartureQuery→$normalizedArrival, winner=${result.departureAirportId}, ${result.price} ${result.currency}"
             )
 
             FlightSearchOutcome.Success(result)
@@ -360,6 +375,7 @@ class FlightSearchRepository(
             price = requireNotNull(price),
             currency = currency,
             airlines = airlineNames,
+            departureAirportId = firstSegment.departureAirport?.id ?: "Non disponibile",
             departureTime = firstSegment.departureAirport?.time ?: "Orario non disponibile",
             arrivalTime = lastSegment.arrivalAirport?.time ?: "Orario non disponibile",
             stops = layovers.size,
@@ -369,7 +385,6 @@ class FlightSearchRepository(
 
     private fun SimpleFlightResult.toCacheEntity(
         cacheKey: String,
-        departureId: String,
         arrivalId: String,
         outboundDate: String,
         returnDate: String,
@@ -377,7 +392,7 @@ class FlightSearchRepository(
     ): FlightSearchCacheEntity {
         return FlightSearchCacheEntity(
             cacheKey = cacheKey,
-            departureId = departureId,
+            departureId = departureAirportId,
             arrivalId = arrivalId,
             outboundDate = outboundDate,
             returnDate = returnDate,
@@ -397,6 +412,7 @@ class FlightSearchRepository(
             price = price,
             currency = currency,
             airlines = airlines,
+            departureAirportId = departureId,
             departureTime = departureTime,
             arrivalTime = arrivalTime,
             stops = stops,
@@ -407,12 +423,12 @@ class FlightSearchRepository(
     }
 
     private fun buildCacheKey(
-        departureId: String,
+        canonicalDepartureIds: String,
         arrivalId: String,
         outboundDate: String,
         returnDate: String
     ): String {
-        return "$departureId|$arrivalId|$outboundDate|$returnDate"
+        return "$canonicalDepartureIds|$arrivalId|$outboundDate|$returnDate"
     }
 
     private sealed interface QuotaResult {
