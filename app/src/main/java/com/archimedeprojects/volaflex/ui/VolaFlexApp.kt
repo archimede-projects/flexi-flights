@@ -13,14 +13,17 @@ import androidx.navigation.compose.rememberNavController
 import com.archimedeprojects.volaflex.data.ApiKeyStore
 import com.archimedeprojects.volaflex.data.DiagnosticRepository
 import com.archimedeprojects.volaflex.data.FlightSearchRepository
+import com.archimedeprojects.volaflex.data.NightsSearchRepository
 import com.archimedeprojects.volaflex.data.WeekendSearchRepository
 import com.archimedeprojects.volaflex.data.local.VolaFlexDatabase
+import com.archimedeprojects.volaflex.data.network.SearchApiNetwork
 import com.archimedeprojects.volaflex.data.network.SerpApiNetwork
 
 private object Routes {
     const val HOME = "home"
     const val SEARCH = "search"
     const val WEEKEND = "weekend"
+    const val NIGHTS = "nights"
     const val SETTINGS = "settings"
     const val DIAGNOSTICS = "diagnostics"
 }
@@ -49,6 +52,14 @@ fun VolaFlexApp(
         WeekendSearchRepository(
             service = SerpApiNetwork.service,
             cacheDao = database.weekendSearchCacheDao(),
+            diagnostics = diagnosticRepository
+        )
+    }
+    val nightsSearchRepository = remember(database, diagnosticRepository) {
+        NightsSearchRepository(
+            serpService = SerpApiNetwork.service,
+            searchApiService = SearchApiNetwork.service,
+            cacheDao = database.nightsSearchCacheDao(),
             diagnostics = diagnosticRepository
         )
     }
@@ -81,6 +92,9 @@ fun VolaFlexApp(
                         onOpenWeekend = {
                             navController.navigate(Routes.WEEKEND)
                         },
+                        onOpenNights = {
+                            navController.navigate(Routes.NIGHTS)
+                        },
                         onOpenSettings = {
                             navController.navigate(Routes.SETTINGS)
                         },
@@ -102,6 +116,31 @@ fun VolaFlexApp(
                                 route = Routes.SEARCH,
                                 inclusive = false
                             )
+                        },
+                        onOpenSettings = {
+                            navController.navigate(Routes.SETTINGS)
+                        },
+                        onBackHome = {
+                            navController.popBackStack(
+                                route = Routes.HOME,
+                                inclusive = false
+                            )
+                        }
+                    )
+                }
+
+                composable(Routes.NIGHTS) {
+                    NightsSearchScreen(
+                        apiKeyStore = apiKeyStore,
+                        repository = nightsSearchRepository,
+                        onOpenFixedDates = {
+                            navController.popBackStack(
+                                route = Routes.SEARCH,
+                                inclusive = false
+                            )
+                        },
+                        onOpenWeekend = {
+                            navController.navigate(Routes.WEEKEND)
                         },
                         onOpenSettings = {
                             navController.navigate(Routes.SETTINGS)
