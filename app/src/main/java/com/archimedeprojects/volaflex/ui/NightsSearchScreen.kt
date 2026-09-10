@@ -24,6 +24,7 @@ import androidx.compose.material3.rememberDatePickerState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -49,6 +50,8 @@ import kotlinx.coroutines.launch
 
 private val nightsDateFormatter: DateTimeFormatter = DateTimeFormatter.ofPattern("dd/MM/yyyy")
 private val nightsTimeFormatter: DateTimeFormatter = DateTimeFormatter.ofPattern("HH:mm")
+private const val MAX_NIGHTS_ORIGINS = 3
+private const val MAX_NIGHTS_DESTINATIONS = 3
 
 private sealed interface NightsUiState {
     data object Idle : NightsUiState
@@ -71,8 +74,8 @@ fun NightsSearchScreen(
     onBackHome: () -> Unit
 ) {
     val apiStatus by apiKeyStore.status.collectAsState(initial = ApiKeyStatus())
-    var departureInput by remember { mutableStateOf("") }
-    var arrivalInput by remember { mutableStateOf("") }
+    val departureInputs = remember { mutableStateListOf("") }
+    val arrivalInputs = remember { mutableStateListOf("") }
     var nightsInput by remember { mutableStateOf("3") }
     var targetDate by remember { mutableStateOf(LocalDate.now().plusDays(45)) }
     var flexibilityInput by remember { mutableStateOf("5") }
@@ -80,8 +83,12 @@ fun NightsSearchScreen(
     val scope = rememberCoroutineScope()
 
     val executeSearch: (Boolean) -> Unit = { forceRefresh ->
-        val departure = departureInput.trim().uppercase(Locale.ROOT)
-        val arrival = arrivalInput.trim().uppercase(Locale.ROOT)
+        val departures = departureInputs
+            .map { it.trim().uppercase(Locale.ROOT) }
+            .filter { it.isNotBlank() }
+        val arrivals = arrivalInputs
+            .map { it.trim().uppercase(Locale.ROOT) }
+            .filter { it.isNotBlank() }
         val nights = nightsInput.toIntOrNull()
         val flexibility = flexibilityInput.toIntOrNull()
 
@@ -102,8 +109,8 @@ fun NightsSearchScreen(
                 val outcome = repository.search(
                     serpApiKey = serpApiKey,
                     searchApiKey = searchApiKey,
-                    departureId = departure,
-                    arrivalId = arrival,
+                    departureIds = departures,
+                    arrivalIds = arrivals,
                     nights = requireNotNull(nights),
                     targetDate = targetDate,
                     flexibilityDays = requireNotNull(flexibility),
@@ -154,38 +161,28 @@ fun NightsSearchScreen(
         }
 
         Text(
-            text = "Scegli quante notti vuoi restare e una data target. VolaFlex cerca partenze entro ±X giorni e mantiene sempre il ritorno esattamente N giorni dopo.",
+            text = "Scegli quante notti vuoi restare e una data target. Puoi usare fino a 3 origini e 3 destinazioni: VolaFlex le invia insieme ai provider e mantiene il ritorno esattamente N giorni dopo.",
             style = MaterialTheme.typography.bodyMedium
         )
 
-        OutlinedTextField(
-            value = departureInput,
-            onValueChange = {
-                departureInput = it
-                if (uiState is NightsUiState.IataWarning) uiState = NightsUiState.Idle
-            },
-            modifier = Modifier.fillMaxWidth(),
-            label = { Text("Partenza (es. FCO)") },
-            singleLine = true,
-            keyboardOptions = KeyboardOptions(
-                capitalization = KeyboardCapitalization.Characters,
-                keyboardType = KeyboardType.Ascii
-            )
+        Text("Aeroporti di partenza", style = MaterialTheme.typography.titleMedium)
+        AirportInputs(
+            values = departureInputs,
+            labelPrefix = "Partenza",
+            example = "FCO",
+            addLabel = "+ Aggiungi origine",
+            maxItems = MAX_NIGHTS_ORIGINS,
+            onChanged = { uiState = NightsUiState.Idle }
         )
 
-        OutlinedTextField(
-            value = arrivalInput,
-            onValueChange = {
-                arrivalInput = it
-                if (uiState is NightsUiState.IataWarning) uiState = NightsUiState.Idle
-            },
-            modifier = Modifier.fillMaxWidth(),
-            label = { Text("Destinazione (es. MAD)") },
-            singleLine = true,
-            keyboardOptions = KeyboardOptions(
-                capitalization = KeyboardCapitalization.Characters,
-                keyboardType = KeyboardType.Ascii
-            )
+        Text("Aeroporti di destinazione", style = MaterialTheme.typography.titleMedium)
+        AirportInputs(
+            values = arrivalInputs,
+            labelPrefix = "Destinazione",
+            example = "MAD",
+            addLabel = "+ Aggiungi destinazione",
+            maxItems = MAX_NIGHTS_DESTINATIONS,
+            onChanged = { uiState = NightsUiState.Idle }
         )
 
         OutlinedTextField(
@@ -219,17 +216,25 @@ fun NightsSearchScreen(
 
         Button(
             onClick = {
-                val departure = departureInput.trim().uppercase(Locale.ROOT)
-                val arrival = arrivalInput.trim().uppercase(Locale.ROOT)
+                val departures = departureInputs.map { it.trim().uppercase(Locale.ROOT) }
+                val arrivals = arrivalInputs.map { it.trim().uppercase(Locale.ROOT) }
+                val nonBlankDepartures = departures.filter { it.isNotBlank() }
+                val nonBlankArrivals = arrivals.filter { it.isNotBlank() }
                 val nights = nightsInput.toIntOrNull()
                 val flexibility = flexibilityInput.toIntOrNull()
 
                 when {
-                    departure.isBlank() || arrival.isBlank() -> {
-                        uiState = NightsUiState.Message("Inserisci sia la partenza sia la destinazione.")
+                    departures.any { it.isBlank() } || arrivals.any { it.isBlank() } -> {
+                        uiState = NightsUiState.Message("Compila tutti gli aeroporti di partenza e destinazione aggiunti.")
                     }
-                    departure == arrival -> {
-                        uiState = NightsUiState.Message("Partenza e destinazione devono essere diverse.")
+                    nonBlankDepartures.distinct().size != nonBlankDepartures.size -> {
+                        uiState = NightsUiState.Message("Gli aeroporti di partenza devono essere diversi tra loro.")
+                    }
+                    nonBlankArrivals.distinct().size != nonBlankArrivals.size -> {
+                        uiState = NightsUiState.Message("Gli aeroporti di destinazione devono essere diversi tra loro.")
+                    }
+                    nonBlankDepartures.any { it in nonBlankArrivals } -> {
+                        uiState = NightsUiState.Message("Nessuna destinazione può coincidere con uno degli aeroporti di partenza.")
                     }
                     nights == null || nights !in 1..30 -> {
                         uiState = NightsUiState.Message("Inserisci un numero di notti tra 1 e 30.")
@@ -241,7 +246,7 @@ fun NightsSearchScreen(
                         uiState = NightsUiState.Message("La data target non può essere nel passato.")
                     }
                     else -> {
-                        val unknownCodes = listOf(departure, arrival)
+                        val unknownCodes = (nonBlankDepartures + nonBlankArrivals)
                             .distinct()
                             .filterNot(AirportDirectory::isKnown)
 
@@ -271,7 +276,7 @@ fun NightsSearchScreen(
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     CircularProgressIndicator()
-                    Text("Discovery date e verifica Google Flights in corso…")
+                    Text("Discovery date multi-aeroporto e verifica Google Flights in corso…")
                 }
             }
             is NightsUiState.IataWarning -> {
@@ -332,6 +337,76 @@ fun NightsSearchScreen(
 }
 
 @Composable
+private fun AirportInputs(
+    values: MutableList<String>,
+    labelPrefix: String,
+    example: String,
+    addLabel: String,
+    maxItems: Int,
+    onChanged: () -> Unit
+) {
+    values.toList().forEachIndexed { index, value ->
+        if (index == 0) {
+            OutlinedTextField(
+                value = value,
+                onValueChange = {
+                    values[index] = it
+                    onChanged()
+                },
+                modifier = Modifier.fillMaxWidth(),
+                label = { Text("$labelPrefix ${index + 1} (es. $example)") },
+                singleLine = true,
+                keyboardOptions = KeyboardOptions(
+                    capitalization = KeyboardCapitalization.Characters,
+                    keyboardType = KeyboardType.Ascii
+                )
+            )
+        } else {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                OutlinedTextField(
+                    value = value,
+                    onValueChange = {
+                        values[index] = it
+                        onChanged()
+                    },
+                    modifier = Modifier.weight(1f),
+                    label = { Text("$labelPrefix ${index + 1}") },
+                    singleLine = true,
+                    keyboardOptions = KeyboardOptions(
+                        capitalization = KeyboardCapitalization.Characters,
+                        keyboardType = KeyboardType.Ascii
+                    )
+                )
+                TextButton(
+                    onClick = {
+                        values.removeAt(index)
+                        onChanged()
+                    }
+                ) {
+                    Text("Rimuovi")
+                }
+            }
+        }
+    }
+
+    if (values.size < maxItems) {
+        OutlinedButton(
+            onClick = {
+                values.add("")
+                onChanged()
+            },
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Text(addLabel)
+        }
+    }
+}
+
+@Composable
 private fun StrategyPreview(
     flexibilityDays: Int?,
     searchApiConfigured: Boolean
@@ -341,14 +416,14 @@ private fun StrategyPreview(
     val candidateCount = 2 * x + 1
     val text = when {
         candidateCount <= 10 -> {
-            "Strategia prevista: SerpApi diretto ed esaustivo su $candidateCount date. Account API gratuita; massimo $candidateCount query voli."
+            "Strategia prevista: SerpApi diretto ed esaustivo su $candidateCount date. Le liste multi-aeroporto restano una query per data; massimo $candidateCount query voli."
         }
         searchApiConfigured -> {
             val blocks = (candidateCount + 13) / 14
-            "Strategia prevista: SearchAPI.io Calendar in $blocks blocchi (max 14×14=196 combinazioni ciascuno), poi 1 verifica SerpApi precisa."
+            "Strategia prevista: SearchAPI.io Calendar multi-aeroporto in $blocks blocchi (max 14×14=196 combinazioni date ciascuno), poi 1 verifica SerpApi precisa."
         }
         else -> {
-            "SearchAPI.io non configurata: modalità risparmio quota. VolaFlex campionerà 5 date + fino a 2 vicine alla migliore: massimo 7 query SerpApi."
+            "SearchAPI.io non configurata: modalità risparmio quota multi-aeroporto. VolaFlex campionerà 5 date + fino a 2 vicine alla migliore: massimo 7 query SerpApi."
         }
     }
 
@@ -384,6 +459,8 @@ private fun NightsResultCard(
             }
 
             Text("Strategia: ${result.strategyLabel}")
+            Text("Origine effettiva: ${result.departureAirportId}", style = MaterialTheme.typography.titleMedium)
+            Text("Destinazione effettiva: ${result.arrivalAirportId}", style = MaterialTheme.typography.titleMedium)
             Text("Andata: ${formatNightsDate(result.outboundDate)}")
             Text("Ritorno: ${formatNightsDate(result.returnDate)} — ${result.nights} notti")
             Text("Compagnia (andata): ${result.airlines}")
@@ -412,7 +489,7 @@ private fun NightsResultCard(
             }
 
             Text(
-                text = "Il dettaglio esatto del ritorno resta on-demand per non aggiungere query inutili.",
+                text = "Origini e destinazioni multiple vengono inviate insieme. Il dettaglio esatto del ritorno resta on-demand per non aggiungere query inutili.",
                 style = MaterialTheme.typography.bodySmall
             )
 
