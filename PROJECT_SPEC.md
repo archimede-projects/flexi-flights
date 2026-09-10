@@ -105,6 +105,8 @@ Non eseguire il prodotto cartesiano ingenuo `origini × destinazioni × date × 
 6. cache TTL 4h;
 7. diagnostica della strategia eseguita.
 
+v3.1 e v3.2 confermano che per Date fisse il multi-aeroporto si integra naturalmente senza fan-out applicativo: più origini e più destinazioni vengono aggregate nei parametri nativi Google Flights e consumano una sola query provider.
+
 ---
 
 # 4. Provider dati
@@ -123,7 +125,9 @@ Decisioni/API già verificate:
 
 - `engine=google_flights`;
 - `type=1` round-trip;
-- `departure_id` e `arrival_id` accettano aeroporti multipli comma-separated;
+- `departure_id` accetta aeroporti multipli comma-separated;
+- `arrival_id` accetta aeroporti multipli comma-separated;
+- multi-origine + multi-destinazione può essere espresso nella stessa singola richiesta, es. `departure_id=FCO,CIA` e `arrival_id=MAD,BCN,VLC`;
 - `outbound_date`, `return_date` in `YYYY-MM-DD`;
 - `outbound_times` / `return_times`: 2 o 4 ore intere 0–23 separate da virgola, es. `17,23`, `5,11`, `0,23`, `4,18,3,19`;
 - `layover_duration=MIN,MAX` in minuti;
@@ -132,6 +136,8 @@ Decisioni/API già verificate:
 - stessa compagnia operativa: controllo Kotlin;
 - esclusione paese connessione: non nativa → lookup IATA→paese;
 - risposta: `best_flights` / `other_flights`, segmenti con `departure_airport.id/time`, `arrival_airport.id/time`;
+- origine effettiva dell'andata = `departure_airport.id` del primo segmento;
+- destinazione effettiva dell'andata = `arrival_airport.id` dell'ultimo segmento;
 - dettaglio esatto del ritorno round-trip richiede una seconda richiesta con `departure_token`.
 
 Da v2.2 esiste `SerpApiTimeFilterGuard`: blocca localmente formati orari non validi prima della rete.
@@ -250,7 +256,8 @@ Copertura iniziale: circa 180–200 aeroporti principali, Europa + Nord Africa +
 Usi attivi:
 
 - guard anti-typo prima della rete;
-- classificazione geografica.
+- classificazione geografica;
+- validazione di ogni elemento delle liste multi-origine e multi-destinazione Date fisse.
 
 Usi futuri:
 
@@ -280,6 +287,8 @@ Piano approvato:
 
 Le modalità destinazione sono alternative, non composite.
 
+Per Date fisse, v3.1/v3.2 implementano operativamente `Airports(max 3)` su entrambi gli assi, anche se il sealed model geografico generale potrà essere formalizzato nei repository condivisi quando verranno aggiunti Anywhere/Country.
+
 ---
 
 # 7. Cache Room e Diagnostica
@@ -302,21 +311,23 @@ Migrazioni validate:
 - 1→2: `weekend_search_cache`;
 - 2→3: `nights_search_cache`.
 
-### v3.1 cache multi-origine Date fisse
+### v3.1/v3.2 cache multi-aeroporto Date fisse
 
 Nessuna migrazione Room necessaria.
 
-La cache key usa:
+Da v3.2 la cache key usa:
 
-`origini canonicalizzate + destinazione + data andata + data ritorno`
+`origini canonicalizzate + destinazioni canonicalizzate + data andata + data ritorno`
 
-Le origini vengono normalizzate, deduplicate e ordinate alfabeticamente prima della chiave. Quindi:
+Sia origini sia destinazioni vengono normalizzate, deduplicate e ordinate alfabeticamente prima della chiave. Esempi:
 
 `FCO,CIA` = `CIA,FCO`
 
+`MAD,BCN,VLC` = `VLC,MAD,BCN`
+
 come ricerca/cache.
 
-Il campo esistente `flight_search_cache.departureId` viene usato per memorizzare **l'origine effettiva vincente**. Per le vecchie ricerche single-origin, origine richiesta e vincente coincidono, quindi il formato resta retrocompatibile senza cambiare schema.
+Il campo esistente `flight_search_cache.departureId` memorizza **l'origine effettiva vincente**; `flight_search_cache.arrivalId` memorizza **la destinazione effettiva vincente**. Questo mantiene compatibili le vecchie cache single-origin/single-destination, dove aeroporto richiesto ed effettivo coincidono.
 
 La cache N notti include inoltre la strategia (`SERP_EXHAUSTIVE`, `SERP_SAMPLE`, `SEARCHAPI_CALENDAR`) nella chiave.
 
@@ -336,7 +347,7 @@ Tipi correnti:
 
 Nessuna API key nei log. `Copia diagnostica` disponibile.
 
-Per v3.1 il messaggio `GOOGLE_FLIGHTS` include origini canonicalizzate e `winner=<IATA>`; il cache hit include le origini canonicalizzate.
+Da v3.2 il messaggio `GOOGLE_FLIGHTS` include entrambe le liste canonicalizzate e la coppia vincente, ad esempio `origins=CIA,FCO destinations=BCN,MAD,VLC winner=FCO→BCN`. Il cache hit include entrambe le liste canonicalizzate.
 
 ---
 
@@ -346,11 +357,17 @@ Per v3.1 il messaggio `GOOGLE_FLIGHTS` include origini canonicalizzate e `winner
 
 ### `SimpleFlightResult`
 
-Da v3.1 include anche:
+Da v3.2 include:
 
-- `departureAirportId`: origine effettiva del primo segmento dell'andata.
-
-Oltre a prezzo, valuta, compagnia, orari andata, scali, quota e cache metadata.
+- `departureAirportId`: origine effettiva del primo segmento dell'andata;
+- `arrivalAirportId`: destinazione effettiva dell'ultimo segmento dell'andata;
+- prezzo;
+- valuta;
+- compagnia/e andata;
+- orario partenza/arrivo andata;
+- numero scali andata;
+- quota SerpApi verificata;
+- metadata cache.
 
 ### `WeekendCandidate`
 
@@ -423,7 +440,7 @@ RSA4096. Keystore con doppio backup personale.
 GitHub Actions run **#23 = SUCCESS**.
 
 - versione: **`0.1.0-dev.23`**;
-- commit: `834a68b276ecf22761ca9e1c91cddb98702ba961`;
+- commit applicativo: `834a68b276ecf22761ca9e1c91cddb98702ba961`;
 - `BUILD SUCCESSFUL in 1m 35s`;
 - KSP/compile/assembleRelease: SUCCESS;
 - zipalign: SUCCESS;
@@ -432,9 +449,30 @@ GitHub Actions run **#23 = SUCCESS**.
 - v3 signature: true;
 - signer count: 1;
 - fingerprint certificato invariato;
-- APK SHA-256: `5b4bd4c369c913afef736a3765028adef992f3709e1396b99a35858d7d55b766`;
+- APK SHA-256: `5b4bd4c369c913afef736a3765028adef992f3709e1396b99a35858d7d55b766`.
+
+### CI v3.2
+
+GitHub Actions run **#24 = SUCCESS**.
+
+- versione: **`0.1.0-dev.24`**;
+- commit applicativo: `766fe25e9c25e5395c1905ff2337d443b28739b9`;
+- `BUILD SUCCESSFUL in 2m 9s`;
+- 49 task eseguiti;
+- KSP/compile/assembleRelease: SUCCESS;
+- lint release: SUCCESS;
+- zipalign: SUCCESS;
+- apksigner: SUCCESS;
+- v2 signature: true;
+- v3 signature: true;
+- signer count: 1;
+- fingerprint certificato invariato `a1f432f512e3d1867ee4b4535fb06a83fae5413ee700113b34e8b926a2767df3`;
+- RSA 4096;
+- APK SHA-256: `edd5ff433f7b5d399ce1eb4778643872b822f1da849dc8169b28559906161265`;
 - asset size: 9,884,035 byte;
 - `dev-latest` pubblicato correttamente.
+
+Le modifiche documentali successive sono escluse dal trigger e non generano build aggiuntive.
 
 ---
 
@@ -481,7 +519,7 @@ Ramo Calendar + verifica SerpApi e cache validati sul telefono reale. Non invent
 Piano approvato:
 
 1. **v3.1 Multi-origine — Date fisse**;
-2. v3.2 Multi-destinazione + 3×3 — Date fisse;
+2. **v3.2 Multi-destinazione + 3×3 — Date fisse**;
 3. v3.3 Multi-aeroporto — N notti;
 4. v3.4 Anywhere — Discovery;
 5. v3.5 Country — Discovery;
@@ -490,14 +528,14 @@ Piano approvato:
 
 ### v3.1 — Multi-origine Date fisse
 
-**IMPLEMENTATA + CI VERDE + RELEASE PUBBLICATA; TEST TELEFONO PENDENTE.**
+**CHIUSA E VALIDATA SUL TELEFONO REALE — 2026-09-10.**
 
-Scope implementato e solo questo:
+Implementazione:
 
 - 1–3 aeroporti di origine;
 - `+ Aggiungi origine`;
 - origini aggiuntive rimovibili;
-- destinazione singola;
+- destinazione singola in v3.1;
 - IATA guard su tutte le origini e destinazione;
 - duplicati origine bloccati localmente;
 - destinazione non può coincidere con origine;
@@ -506,14 +544,54 @@ Scope implementato e solo questo:
 - cache origini canonicalizzata alfabeticamente;
 - nessuna migrazione Room.
 
-Test raccomandato:
+Test reale completo:
 
-1. anti-typo: `FCO + FC0 → MAD`, premere `Correggi`: 0 query;
-2. live: `FCO + CIA + MXP → MAD`, 20/11/2026 → 23/11/2026: atteso 1 Account API gratuita + 1 Google Flights;
-3. risultato: `Origine effettiva` deve essere FCO/CIA/MXP;
-4. replay con ordine `MXP + FCO + CIA`, stesse date/destinazione: cache hit, 0 query provider e stesso risultato.
+- UI add/remove/max origini: PASS;
+- anti-typo: PASS;
+- blocco duplicati origine: PASS;
+- live: `FCO + CIA + MXP → MAD`, 20/11/2026→23/11/2026;
+- consumo: **1 sola query Google Flights**;
+- vincitore: **MXP**;
+- prezzo: **60 EUR**;
+- replay canonicalizzazione: ordine `MXP + FCO + CIA`, stesse date/destinazione → **CACHE HIT**, 0 nuove query, stesso prezzo 60 EUR e stessa origine vincente MXP.
 
-**Non avanzare a v3.2 finché v3.1 non è validata sul telefono.**
+**Conclusione: canonicalizzazione multi-origine validata end-to-end.**
+
+### v3.2 — Multi-destinazione Date fisse
+
+**IMPLEMENTATA + CI VERDE + RELEASE PUBBLICATA; TEST TELEFONO PENDENTE.**
+
+Scope implementato e solo questo:
+
+- mantiene 1–3 origini v3.1;
+- aggiunge 1–3 aeroporti di destinazione;
+- `+ Aggiungi destinazione`;
+- destinazioni aggiuntive rimovibili;
+- nessuna quarta destinazione;
+- IATA guard su ogni origine e destinazione;
+- duplicati bloccati separatamente per ciascun asse;
+- intersezione origine/destinazione vietata localmente;
+- repository canonicalizza entrambe le liste con trim/uppercase/dedup/sort;
+- una sola SerpApi Google Flights con `departure_id` e `arrival_id` comma-separated, anche per combinazioni 2×3 o 3×3;
+- nessun loop cartesiano applicativo;
+- risultato mostra **origine effettiva** dal primo segmento e **destinazione effettiva** dall'ultimo segmento;
+- cache key canonicalizzata su entrambi gli assi;
+- `flight_search_cache.departureId` e `.arrivalId` memorizzano la coppia vincente;
+- nessuna migrazione Room;
+- Weekend, N notti, SearchAPI Calendar, Anywhere e Country non modificati.
+
+Test raccomandato v3.2:
+
+1. installare `0.1.0-dev.24` sopra la build corrente senza disinstallare;
+2. validare add/remove e massimo 3 destinazioni;
+3. validare localmente duplicati, overlap origine/destinazione e un typo: 0 query se si corregge;
+4. live: `FCO + CIA → MAD + BCN + VLC`, 27/11/2026→30/11/2026;
+5. atteso: 1 Account API gratuita + **1 sola query Google Flights**;
+6. risultato: origine effettiva ∈ {FCO,CIA}, destinazione effettiva ∈ {MAD,BCN,VLC};
+7. Diagnostica: `origins=CIA,FCO destinations=BCN,MAD,VLC winner=<ORIGIN>→<DESTINATION>` e un solo evento `GOOGLE_FLIGHTS` live;
+8. replay riordinando entrambi gli assi, es. `CIA + FCO → VLC + MAD + BCN`, stesse date: **CACHE HIT**, 0 nuove query provider e stessa coppia vincente/prezzo.
+
+**Non avanzare a v3.3 finché v3.2 non è validata sul telefono.**
 
 ---
 
@@ -528,7 +606,7 @@ Test raccomandato:
 - DataStore non cifra autonomamente le API key a riposo;
 - AirportDirectory non è esaustiva;
 - per i paesi serve un catalogo KGMID aggiuntivo;
-- liste multi-airport richiedono canonicalizzazione cache;
+- liste multi-airport richiedono canonicalizzazione cache su entrambi gli assi;
 - Explore è Discovery, non garantisce da solo vincoli precisi;
 - **Explore ha avuto regressioni/fix recenti nel 2026, incluse risposte vuote per ricerche valide: v3.4/v3.5 devono implementare error handling/diagnostica particolarmente robusti**;
 - dettaglio preciso ritorno via `departure_token` resta on-demand;
@@ -538,11 +616,11 @@ Test raccomandato:
 
 # 13. Prossimo milestone operativo
 
-1. Installare `0.1.0-dev.23` sopra la build corrente senza disinstallare.
-2. Validare UI add/remove origini senza rete.
-3. Validare anti-typo su una seconda origine: 0 query.
-4. Eseguire una sola ricerca live multi-origine `FCO + CIA + MXP → MAD`, 20–23/11/2026.
-5. Verificare `Origine effettiva` dal risultato.
+1. Installare `0.1.0-dev.24` sopra la build corrente senza disinstallare.
+2. Validare UI add/remove/max destinazioni.
+3. Validare controlli locali v3.2 senza consumare query.
+4. Eseguire una sola ricerca live `FCO + CIA → MAD + BCN + VLC`, 27–30/11/2026.
+5. Verificare `Origine effettiva` e `Destinazione effettiva`.
 6. Controllare Diagnostica: Account API + un solo Google Flights.
-7. Invertire l'ordine delle origini e verificare cache hit con 0 nuove query.
-8. Se PASS, segnare v3.1 CHIUSA e solo allora implementare v3.2.
+7. Riordinare entrambe le liste e verificare cache hit con 0 nuove query.
+8. Se PASS, segnare v3.2 CHIUSA e solo allora implementare v3.3.
