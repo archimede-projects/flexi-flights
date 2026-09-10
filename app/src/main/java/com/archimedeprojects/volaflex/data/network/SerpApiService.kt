@@ -32,6 +32,11 @@ interface SerpApiService {
         @Query("api_key") apiKey: String
     ): Response<GoogleFlightsResponseDto>
 
+    /**
+     * SerpApi expects outbound_times / return_times as 2 or 4 comma-separated
+     * integer hours in the 0..23 range, e.g. "17,23" or "5,11".
+     * SerpApiTimeFilterGuard validates this again immediately before network I/O.
+     */
     @GET("search")
     suspend fun searchGoogleFlightsWeekendVerification(
         @Query("engine") engine: String,
@@ -75,6 +80,7 @@ object SerpApiNetwork {
     }
 
     private val okHttpClient = OkHttpClient.Builder()
+        .addInterceptor(SerpApiTimeFilterGuard())
         .connectTimeout(20, TimeUnit.SECONDS)
         .readTimeout(60, TimeUnit.SECONDS)
         .writeTimeout(20, TimeUnit.SECONDS)
