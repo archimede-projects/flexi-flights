@@ -23,6 +23,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberDatePickerState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -47,6 +48,7 @@ import kotlinx.coroutines.launch
 
 private val displayDateFormatter: DateTimeFormatter = DateTimeFormatter.ofPattern("dd/MM/yyyy")
 private val displayTimeFormatter: DateTimeFormatter = DateTimeFormatter.ofPattern("HH:mm")
+private const val MAX_FIXED_DATE_ORIGINS = 3
 
 private sealed interface SearchUiState {
     data object Idle : SearchUiState
@@ -68,7 +70,7 @@ fun SearchScreen(
     onOpenSettings: () -> Unit,
     onBackHome: () -> Unit
 ) {
-    var departureInput by remember { mutableStateOf("") }
+    val departureInputs = remember { mutableStateListOf("") }
     var arrivalInput by remember { mutableStateOf("") }
     var outboundDate by remember { mutableStateOf(LocalDate.now().plusDays(30)) }
     var returnDate by remember { mutableStateOf(LocalDate.now().plusDays(33)) }
@@ -76,7 +78,9 @@ fun SearchScreen(
     val scope = rememberCoroutineScope()
 
     val executeSearch: (Boolean) -> Unit = { forceRefresh ->
-        val departure = departureInput.trim().uppercase(Locale.ROOT)
+        val departures = departureInputs
+            .map { it.trim().uppercase(Locale.ROOT) }
+            .filter { it.isNotBlank() }
         val arrival = arrivalInput.trim().uppercase(Locale.ROOT)
 
         scope.launch {
@@ -97,7 +101,7 @@ fun SearchScreen(
             uiState = when (
                 val outcome = repository.searchRoundTrip(
                     apiKey = apiKey,
-                    departureId = departure,
+                    departureIds = departures,
                     arrivalId = arrival,
                     outboundDate = outboundDate.toString(),
                     returnDate = returnDate.toString(),
@@ -151,26 +155,71 @@ fun SearchScreen(
         }
 
         Text(
-            text = "Una rotta, date fisse, classe Economy. Usa codici IATA come FCO e MAD.",
+            text = "Date fisse, classe Economy. Puoi indicare fino a 3 aeroporti di partenza; la destinazione resta singola in v3.1.",
             style = MaterialTheme.typography.bodyMedium
         )
 
-        OutlinedTextField(
-            value = departureInput,
-            onValueChange = {
-                departureInput = it
-                if (uiState is SearchUiState.IataWarning) {
-                    uiState = SearchUiState.Idle
+        Text("Aeroporti di partenza", style = MaterialTheme.typography.titleMedium)
+
+        departureInputs.toList().forEachIndexed { index, value ->
+            if (index == 0) {
+                OutlinedTextField(
+                    value = value,
+                    onValueChange = {
+                        departureInputs[index] = it
+                        if (uiState is SearchUiState.IataWarning) uiState = SearchUiState.Idle
+                    },
+                    modifier = Modifier.fillMaxWidth(),
+                    label = { Text("Partenza ${index + 1} (es. FCO)") },
+                    singleLine = true,
+                    keyboardOptions = KeyboardOptions(
+                        capitalization = KeyboardCapitalization.Characters,
+                        keyboardType = KeyboardType.Ascii
+                    )
+                )
+            } else {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    OutlinedTextField(
+                        value = value,
+                        onValueChange = {
+                            departureInputs[index] = it
+                            if (uiState is SearchUiState.IataWarning) uiState = SearchUiState.Idle
+                        },
+                        modifier = Modifier.weight(1f),
+                        label = { Text("Partenza ${index + 1}") },
+                        singleLine = true,
+                        keyboardOptions = KeyboardOptions(
+                            capitalization = KeyboardCapitalization.Characters,
+                            keyboardType = KeyboardType.Ascii
+                        )
+                    )
+                    TextButton(
+                        onClick = {
+                            departureInputs.removeAt(index)
+                            uiState = SearchUiState.Idle
+                        }
+                    ) {
+                        Text("Rimuovi")
+                    }
                 }
-            },
-            modifier = Modifier.fillMaxWidth(),
-            label = { Text("Partenza (es. FCO)") },
-            singleLine = true,
-            keyboardOptions = KeyboardOptions(
-                capitalization = KeyboardCapitalization.Characters,
-                keyboardType = KeyboardType.Ascii
-            )
-        )
+            }
+        }
+
+        if (departureInputs.size < MAX_FIXED_DATE_ORIGINS) {
+            OutlinedButton(
+                onClick = {
+                    departureInputs.add("")
+                    uiState = SearchUiState.Idle
+                },
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Text("+ Aggiungi origine")
+            }
+        }
 
         OutlinedTextField(
             value = arrivalInput,
@@ -208,15 +257,19 @@ fun SearchScreen(
 
         Button(
             onClick = {
-                val departure = departureInput.trim().uppercase(Locale.ROOT)
+                val departures = departureInputs.map { it.trim().uppercase(Locale.ROOT) }
                 val arrival = arrivalInput.trim().uppercase(Locale.ROOT)
+                val nonBlankDepartures = departures.filter { it.isNotBlank() }
 
                 when {
-                    departure.isBlank() || arrival.isBlank() -> {
-                        uiState = SearchUiState.Message("Inserisci sia la partenza sia l'arrivo.")
+                    departures.any { it.isBlank() } || arrival.isBlank() -> {
+                        uiState = SearchUiState.Message("Compila tutti gli aeroporti di partenza aggiunti e l'arrivo.")
                     }
-                    departure == arrival -> {
-                        uiState = SearchUiState.Message("Partenza e arrivo devono essere diversi.")
+                    nonBlankDepartures.distinct().size != nonBlankDepartures.size -> {
+                        uiState = SearchUiState.Message("Gli aeroporti di partenza devono essere diversi tra loro.")
+                    }
+                    arrival in nonBlankDepartures -> {
+                        uiState = SearchUiState.Message("L'arrivo non può coincidere con uno degli aeroporti di partenza.")
                     }
                     returnDate.isBefore(outboundDate) -> {
                         uiState = SearchUiState.Message(
@@ -224,7 +277,7 @@ fun SearchScreen(
                         )
                     }
                     else -> {
-                        val unknownCodes = listOf(departure, arrival)
+                        val unknownCodes = (nonBlankDepartures + arrival)
                             .distinct()
                             .filterNot(AirportDirectory::isKnown)
 
@@ -256,7 +309,7 @@ fun SearchScreen(
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     CircularProgressIndicator()
-                    Text("Controllo cache/quota e ricerca in corso…")
+                    Text("Controllo cache/quota e ricerca multi-origine in corso…")
                 }
             }
 
@@ -349,6 +402,10 @@ private fun FlightResultCard(
                 )
             }
 
+            Text(
+                text = "Origine effettiva: ${result.departureAirportId}",
+                style = MaterialTheme.typography.titleMedium
+            )
             Text("Prezzo round-trip: ${result.price} ${result.currency}")
             Text("Compagnia (andata): ${result.airlines}")
             Text("Partenza (andata): ${result.departureTime}")
@@ -371,7 +428,7 @@ private fun FlightResultCard(
             }
 
             Text(
-                text = "I dettagli del ritorno richiedono una seconda query SerpApi e non vengono ancora richiesti.",
+                text = "Le origini multiple vengono inviate insieme in una sola query Google Flights. I dettagli del ritorno restano on-demand.",
                 style = MaterialTheme.typography.bodySmall
             )
         }
