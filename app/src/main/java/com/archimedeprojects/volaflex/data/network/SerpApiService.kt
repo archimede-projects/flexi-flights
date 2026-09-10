@@ -32,6 +32,22 @@ interface SerpApiService {
         @Query("api_key") apiKey: String
     ): Response<GoogleFlightsResponseDto>
 
+    @GET("search")
+    suspend fun searchGoogleFlightsByPrice(
+        @Query("engine") engine: String,
+        @Query("departure_id") departureId: String,
+        @Query("arrival_id") arrivalId: String,
+        @Query("outbound_date") outboundDate: String,
+        @Query("return_date") returnDate: String,
+        @Query("type") type: Int,
+        @Query("travel_class") travelClass: Int,
+        @Query("sort_by") sortBy: Int,
+        @Query("currency") currency: String,
+        @Query("hl") language: String,
+        @Query("gl") country: String,
+        @Query("api_key") apiKey: String
+    ): Response<GoogleFlightsResponseDto>
+
     /**
      * SerpApi expects outbound_times / return_times as 2 or 4 comma-separated
      * integer hours in the 0..23 range, e.g. "17,23" or "5,11".
