@@ -33,6 +33,24 @@ interface SerpApiService {
     ): Response<GoogleFlightsResponseDto>
 
     @GET("search")
+    suspend fun searchGoogleFlightsWeekendVerification(
+        @Query("engine") engine: String,
+        @Query("departure_id") departureId: String,
+        @Query("arrival_id") arrivalId: String,
+        @Query("outbound_date") outboundDate: String,
+        @Query("return_date") returnDate: String,
+        @Query("outbound_times") outboundTimes: String,
+        @Query("return_times") returnTimes: String,
+        @Query("type") type: Int,
+        @Query("travel_class") travelClass: Int,
+        @Query("sort_by") sortBy: Int,
+        @Query("currency") currency: String,
+        @Query("hl") language: String,
+        @Query("gl") country: String,
+        @Query("api_key") apiKey: String
+    ): Response<GoogleFlightsResponseDto>
+
+    @GET("search")
     suspend fun searchTravelExplore(
         @Query("engine") engine: String,
         @Query("departure_id") departureId: String,
