@@ -2,6 +2,7 @@ package com.archimedeprojects.volaflex.data.network
 
 import java.util.concurrent.TimeUnit
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonObject
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import retrofit2.Response
@@ -85,6 +86,25 @@ interface SerpApiService {
         @Query("gl") country: String,
         @Query("api_key") apiKey: String
     ): Response<TravelExploreResponseDto>
+
+    /**
+     * v3.4 Anywhere discovery deliberately omits both arrival_id and arrival_area_id.
+     * JsonObject is used here so the repository can distinguish a missing
+     * `destinations` field from a present-but-empty list for robust diagnostics.
+     */
+    @GET("search")
+    suspend fun searchTravelExploreAnywhere(
+        @Query("engine") engine: String,
+        @Query("departure_id") departureId: String,
+        @Query("month") month: Int,
+        @Query("travel_duration") travelDuration: Int,
+        @Query("travel_class") travelClass: Int,
+        @Query("travel_mode") travelMode: Int,
+        @Query("currency") currency: String,
+        @Query("hl") language: String,
+        @Query("gl") country: String,
+        @Query("api_key") apiKey: String
+    ): Response<JsonObject>
 }
 
 object SerpApiNetwork {
