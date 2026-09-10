@@ -10,6 +10,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
+import com.archimedeprojects.volaflex.data.AnywhereWeekendSearchRepository
 import com.archimedeprojects.volaflex.data.ApiKeyStore
 import com.archimedeprojects.volaflex.data.DiagnosticRepository
 import com.archimedeprojects.volaflex.data.FlightSearchRepository
@@ -50,6 +51,13 @@ fun VolaFlexApp(
     }
     val weekendSearchRepository = remember(database, diagnosticRepository) {
         WeekendSearchRepository(
+            service = SerpApiNetwork.service,
+            cacheDao = database.weekendSearchCacheDao(),
+            diagnostics = diagnosticRepository
+        )
+    }
+    val anywhereWeekendSearchRepository = remember(database, diagnosticRepository) {
+        AnywhereWeekendSearchRepository(
             service = SerpApiNetwork.service,
             cacheDao = database.weekendSearchCacheDao(),
             diagnostics = diagnosticRepository
@@ -111,6 +119,7 @@ fun VolaFlexApp(
                     WeekendSearchScreen(
                         apiKeyStore = apiKeyStore,
                         repository = weekendSearchRepository,
+                        anywhereRepository = anywhereWeekendSearchRepository,
                         onOpenFixedDates = {
                             navController.popBackStack(
                                 route = Routes.SEARCH,
