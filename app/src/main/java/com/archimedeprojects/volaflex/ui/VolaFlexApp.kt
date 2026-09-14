@@ -119,6 +119,7 @@ fun VolaFlexApp(
                         onOpenFixedDates = {
                             navController.popBackStack(route = Routes.SEARCH, inclusive = false)
                         },
+                        onOpenNights = { navController.navigate(Routes.NIGHTS) },
                         onOpenSettings = { navController.navigate(Routes.SETTINGS) },
                         onBackHome = {
                             navController.popBackStack(route = Routes.HOME, inclusive = false)
