@@ -12,6 +12,7 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import com.archimedeprojects.volaflex.data.AnywhereWeekendSearchRepository
 import com.archimedeprojects.volaflex.data.ApiKeyStore
+import com.archimedeprojects.volaflex.data.CountryWeekendSearchRepository
 import com.archimedeprojects.volaflex.data.DiagnosticRepository
 import com.archimedeprojects.volaflex.data.FlightSearchRepository
 import com.archimedeprojects.volaflex.data.NightsSearchRepository
@@ -63,6 +64,13 @@ fun VolaFlexApp(
             diagnostics = diagnosticRepository
         )
     }
+    val countryWeekendSearchRepository = remember(database, diagnosticRepository) {
+        CountryWeekendSearchRepository(
+            service = SerpApiNetwork.service,
+            cacheDao = database.weekendSearchCacheDao(),
+            diagnostics = diagnosticRepository
+        )
+    }
     val nightsSearchRepository = remember(database, diagnosticRepository) {
         NightsSearchRepository(
             serpService = SerpApiNetwork.service,
@@ -84,12 +92,8 @@ fun VolaFlexApp(
                 composable(Routes.HOME) {
                     HomeScreen(
                         versionName = versionName,
-                        onOpenSearch = {
-                            navController.navigate(Routes.SEARCH)
-                        },
-                        onOpenSettings = {
-                            navController.navigate(Routes.SETTINGS)
-                        }
+                        onOpenSearch = { navController.navigate(Routes.SEARCH) },
+                        onOpenSettings = { navController.navigate(Routes.SETTINGS) }
                     )
                 }
 
@@ -97,20 +101,11 @@ fun VolaFlexApp(
                     SearchScreen(
                         apiKeyStore = apiKeyStore,
                         repository = flightSearchRepository,
-                        onOpenWeekend = {
-                            navController.navigate(Routes.WEEKEND)
-                        },
-                        onOpenNights = {
-                            navController.navigate(Routes.NIGHTS)
-                        },
-                        onOpenSettings = {
-                            navController.navigate(Routes.SETTINGS)
-                        },
+                        onOpenWeekend = { navController.navigate(Routes.WEEKEND) },
+                        onOpenNights = { navController.navigate(Routes.NIGHTS) },
+                        onOpenSettings = { navController.navigate(Routes.SETTINGS) },
                         onBackHome = {
-                            navController.popBackStack(
-                                route = Routes.HOME,
-                                inclusive = false
-                            )
+                            navController.popBackStack(route = Routes.HOME, inclusive = false)
                         }
                     )
                 }
@@ -120,20 +115,13 @@ fun VolaFlexApp(
                         apiKeyStore = apiKeyStore,
                         repository = weekendSearchRepository,
                         anywhereRepository = anywhereWeekendSearchRepository,
+                        countryRepository = countryWeekendSearchRepository,
                         onOpenFixedDates = {
-                            navController.popBackStack(
-                                route = Routes.SEARCH,
-                                inclusive = false
-                            )
+                            navController.popBackStack(route = Routes.SEARCH, inclusive = false)
                         },
-                        onOpenSettings = {
-                            navController.navigate(Routes.SETTINGS)
-                        },
+                        onOpenSettings = { navController.navigate(Routes.SETTINGS) },
                         onBackHome = {
-                            navController.popBackStack(
-                                route = Routes.HOME,
-                                inclusive = false
-                            )
+                            navController.popBackStack(route = Routes.HOME, inclusive = false)
                         }
                     )
                 }
@@ -143,22 +131,12 @@ fun VolaFlexApp(
                         apiKeyStore = apiKeyStore,
                         repository = nightsSearchRepository,
                         onOpenFixedDates = {
-                            navController.popBackStack(
-                                route = Routes.SEARCH,
-                                inclusive = false
-                            )
+                            navController.popBackStack(route = Routes.SEARCH, inclusive = false)
                         },
-                        onOpenWeekend = {
-                            navController.navigate(Routes.WEEKEND)
-                        },
-                        onOpenSettings = {
-                            navController.navigate(Routes.SETTINGS)
-                        },
+                        onOpenWeekend = { navController.navigate(Routes.WEEKEND) },
+                        onOpenSettings = { navController.navigate(Routes.SETTINGS) },
                         onBackHome = {
-                            navController.popBackStack(
-                                route = Routes.HOME,
-                                inclusive = false
-                            )
+                            navController.popBackStack(route = Routes.HOME, inclusive = false)
                         }
                     )
                 }
@@ -166,14 +144,9 @@ fun VolaFlexApp(
                 composable(Routes.SETTINGS) {
                     SettingsScreen(
                         apiKeyStore = apiKeyStore,
-                        onOpenDiagnostics = {
-                            navController.navigate(Routes.DIAGNOSTICS)
-                        },
+                        onOpenDiagnostics = { navController.navigate(Routes.DIAGNOSTICS) },
                         onBackHome = {
-                            navController.popBackStack(
-                                route = Routes.HOME,
-                                inclusive = false
-                            )
+                            navController.popBackStack(route = Routes.HOME, inclusive = false)
                         }
                     )
                 }
@@ -181,9 +154,7 @@ fun VolaFlexApp(
                 composable(Routes.DIAGNOSTICS) {
                     DiagnosticsScreen(
                         repository = diagnosticRepository,
-                        onBackSettings = {
-                            navController.popBackStack()
-                        }
+                        onBackSettings = { navController.popBackStack() }
                     )
                 }
             }
