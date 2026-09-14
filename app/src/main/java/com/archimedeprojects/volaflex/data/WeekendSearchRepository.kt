@@ -2,14 +2,9 @@ package com.archimedeprojects.volaflex.data
 
 import com.archimedeprojects.volaflex.data.local.WeekendSearchCacheDao
 import com.archimedeprojects.volaflex.data.local.WeekendSearchCacheEntity
-import com.archimedeprojects.volaflex.data.network.FlightOptionDto
 import com.archimedeprojects.volaflex.data.network.SerpApiService
 import com.archimedeprojects.volaflex.data.network.TravelExploreResponseDto
 import java.io.IOException
-import java.time.DayOfWeek
-import java.time.LocalDate
-import java.time.YearMonth
-import java.time.temporal.TemporalAdjusters
 import java.util.Locale
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.SerializationException
@@ -19,10 +14,6 @@ import kotlinx.serialization.json.Json
 
 private const val WEEKEND_CACHE_TTL_MILLIS = 4L * 60L * 60L * 1000L
 private const val WEEKEND_QUOTA_RESERVE = 5
-private const val FRIDAY_OUTBOUND_TIMES = "17,23"
-private const val SATURDAY_OUTBOUND_TIMES = "5,11"
-private const val SUNDAY_RETURN_TIMES = "17,23"
-private const val MONDAY_RETURN_TIMES = "0,23"
 
 @Serializable
 data class VerifiedWeekendResult(
@@ -89,6 +80,7 @@ class WeekendSearchRepository(
         ignoreUnknownKeys = true
         encodeDefaults = true
     }
+    private val verificationEngine = WeekendVerificationEngine(service, cacheDao, diagnostics)
 
     suspend fun searchWeekendCandidates(
         apiKey: String,
@@ -146,7 +138,9 @@ class WeekendSearchRepository(
                         apiKey = apiKey,
                         departureId = departure,
                         arrivalId = arrival,
-                        candidates = cachedCandidates
+                        periodKey = periodKey,
+                        candidates = cachedCandidates,
+                        forceRefresh = false
                     )
 
                     return when (verification) {
@@ -160,7 +154,8 @@ class WeekendSearchRepository(
                                     candidates = verification.candidates,
                                     searchesLeftBeforeSearch = cached.searchesLeftBeforeSearch,
                                     fromCache = true,
-                                    cachedAtEpochMillis = cached.cachedAtEpochMillis
+                                    cachedAtEpochMillis = cached.cachedAtEpochMillis,
+                                    verificationFromCache = verification.fromCache
                                 )
                             )
                         }
@@ -171,6 +166,7 @@ class WeekendSearchRepository(
                                     searchesLeftBeforeSearch = cached.searchesLeftBeforeSearch,
                                     fromCache = true,
                                     cachedAtEpochMillis = cached.cachedAtEpochMillis,
+                                    verificationFromCache = verification.fromCache,
                                     verificationMessage = verification.message
                                 )
                             )
@@ -250,7 +246,9 @@ class WeekendSearchRepository(
                 apiKey = apiKey,
                 departureId = departure,
                 arrivalId = arrival,
-                candidates = sortedCandidates
+                periodKey = periodKey,
+                candidates = sortedCandidates,
+                forceRefresh = forceRefresh
             )
         ) {
             is VerificationPhase.Success -> {
@@ -267,7 +265,8 @@ class WeekendSearchRepository(
                 WeekendSearchOutcome.Success(
                     WeekendSearchResult(
                         candidates = verification.candidates,
-                        searchesLeftBeforeSearch = searchesLeft
+                        searchesLeftBeforeSearch = searchesLeft,
+                        verificationFromCache = verification.fromCache
                     )
                 )
             }
@@ -276,6 +275,7 @@ class WeekendSearchRepository(
                     WeekendSearchResult(
                         candidates = sortedCandidates,
                         searchesLeftBeforeSearch = searchesLeft,
+                        verificationFromCache = verification.fromCache,
                         verificationMessage = verification.message
                     )
                 )
@@ -398,253 +398,39 @@ class WeekendSearchRepository(
         apiKey: String,
         departureId: String,
         arrivalId: String,
-        candidates: List<WeekendCandidate>
+        periodKey: String,
+        candidates: List<WeekendCandidate>,
+        forceRefresh: Boolean
     ): VerificationPhase {
         val bestIndex = candidates.indices.minByOrNull { candidates[it].price }
             ?: return VerificationPhase.Unavailable("Nessun candidato Explore disponibile da verificare.")
         val bestCandidate = candidates[bestIndex]
-        val patterns = buildVerificationPatterns(bestCandidate)
-
-        if (patterns.isEmpty()) {
-            val message = "Explore ha trovato un intervallo indicativo, ma non è stato possibile ricavare un weekend venerdì/sabato → domenica/lunedì valido nello stesso mese."
-            diagnostics.log(
-                requestType = "WEEKEND_VERIFY",
-                outcome = "EMPTY",
-                message = message
-            )
-            return VerificationPhase.Unavailable(message)
-        }
-
-        val searchesLeft = when (val quotaResult = readLiveQuota(apiKey)) {
-            is QuotaResult.Available -> quotaResult.searchesLeft
-            is QuotaResult.Error -> return VerificationPhase.Unavailable(quotaResult.message)
-        }
-
-        val minimumRequired = WEEKEND_QUOTA_RESERVE + patterns.size
-        if (searchesLeft < minimumRequired) {
-            val message = "Verifica weekend bloccata: servono almeno $minimumRequired query residue per controllare ${patterns.size} combinazioni e conservare la riserva di $WEEKEND_QUOTA_RESERVE. Quota attuale: $searchesLeft. Il risultato Explore resta disponibile come indicativo."
-            diagnostics.log(
-                requestType = "QUOTA_GUARD",
-                outcome = "BLOCKED",
-                message = message
-            )
-            return VerificationPhase.Unavailable(message)
-        }
-
-        val verifiedOptions = mutableListOf<VerifiedWeekendResult>()
-        var verificationError: String? = null
-
-        for (pattern in patterns) {
-            when (
-                val outcome = verifyPattern(
-                    apiKey = apiKey,
-                    departureId = departureId,
-                    arrivalId = arrivalId,
-                    pattern = pattern,
-                    searchesLeftBeforeVerification = searchesLeft
-                )
-            ) {
-                is PatternVerification.Success -> verifiedOptions += outcome.result
-                PatternVerification.Empty -> Unit
-                is PatternVerification.Error -> {
-                    verificationError = outcome.message
-                    break
-                }
-            }
-        }
-
-        val cheapestVerified = verifiedOptions.minByOrNull { it.price }
-        if (cheapestVerified == null) {
-            return VerificationPhase.Unavailable(
-                verificationError
-                    ?: "Nessun volo compatibile con le fasce weekend richieste è stato trovato per il candidato Explore."
-            )
-        }
-
-        val updatedCandidates = candidates.toMutableList()
-        updatedCandidates[bestIndex] = bestCandidate.copy(
-            verification = cheapestVerified
+        val seed = WeekendVerificationSeed(
+            airportIata = arrivalId,
+            outboundDate = bestCandidate.outboundDate,
+            returnDate = bestCandidate.returnDate,
+            monthKey = bestCandidate.monthKey
         )
 
-        return VerificationPhase.Success(updatedCandidates)
-    }
-
-    private suspend fun verifyPattern(
-        apiKey: String,
-        departureId: String,
-        arrivalId: String,
-        pattern: WeekendPattern,
-        searchesLeftBeforeVerification: Int
-    ): PatternVerification {
-        return try {
-            val response = service.searchGoogleFlightsWeekendVerification(
-                engine = "google_flights",
+        return when (
+            val verification = verificationEngine.verify(
+                apiKey = apiKey,
                 departureId = departureId,
-                arrivalId = arrivalId,
-                outboundDate = pattern.outboundDate.toString(),
-                returnDate = pattern.returnDate.toString(),
-                outboundTimes = pattern.outboundTimes,
-                returnTimes = pattern.returnTimes,
-                type = 1,
-                travelClass = 1,
-                sortBy = 2,
-                currency = "EUR",
-                language = "it",
-                country = "it",
-                apiKey = apiKey
+                destinationScope = "AIRPORT:$arrivalId",
+                periodKey = periodKey,
+                seed = seed,
+                forceRefresh = forceRefresh
             )
-
-            if (!response.isSuccessful) {
-                val mapped = mapHttpError(response.code(), duringAccountCheck = false)
-                diagnostics.log(
-                    requestType = "WEEKEND_VERIFY",
-                    outcome = "ERROR",
-                    httpStatus = response.code(),
-                    message = "${pattern.label}: ${mapped.message}"
-                )
-                return PatternVerification.Error(mapped.message)
+        ) {
+            is WeekendVerificationOutcome.Success -> {
+                val updatedCandidates = candidates.toMutableList()
+                updatedCandidates[bestIndex] = bestCandidate.copy(verification = verification.result)
+                VerificationPhase.Success(updatedCandidates, verification.fromCache)
             }
-
-            val body = response.body()
-            if (body == null) {
-                val message = "Google Flights ha restituito una risposta vuota durante la verifica weekend."
-                diagnostics.log(
-                    requestType = "WEEKEND_VERIFY",
-                    outcome = "ERROR",
-                    httpStatus = response.code(),
-                    message = "${pattern.label}: $message"
-                )
-                return PatternVerification.Error(message)
-            }
-
-            if (!body.error.isNullOrBlank()) {
-                val message = readableSerpApiError(body.error)
-                diagnostics.log(
-                    requestType = "WEEKEND_VERIFY",
-                    outcome = "ERROR",
-                    httpStatus = response.code(),
-                    message = "${pattern.label}: $message"
-                )
-                return PatternVerification.Error(message)
-            }
-
-            val option = (body.bestFlights + body.otherFlights)
-                .filter { it.price != null && it.flights.isNotEmpty() }
-                .minByOrNull { it.price ?: Int.MAX_VALUE }
-
-            if (option == null) {
-                diagnostics.log(
-                    requestType = "WEEKEND_VERIFY",
-                    outcome = "EMPTY",
-                    httpStatus = response.code(),
-                    message = "$departureId→$arrivalId ${pattern.label}: nessun volo"
-                )
-                return PatternVerification.Empty
-            }
-
-            val verified = option.toVerifiedWeekendResult(
-                pattern = pattern,
-                currency = body.searchParameters?.currency ?: "EUR",
-                searchesLeftBeforeVerification = searchesLeftBeforeVerification
+            is WeekendVerificationOutcome.Unavailable -> VerificationPhase.Unavailable(
+                verification.message,
+                verification.fromCache
             )
-
-            diagnostics.log(
-                requestType = "WEEKEND_VERIFY",
-                outcome = "SUCCESS",
-                httpStatus = response.code(),
-                message = "$departureId→$arrivalId ${pattern.label}: ${verified.price} ${verified.currency}"
-            )
-            PatternVerification.Success(verified)
-        } catch (_: IOException) {
-            val message = "Errore di rete durante la verifica Google Flights del weekend."
-            diagnostics.log(
-                requestType = "WEEKEND_VERIFY",
-                outcome = "ERROR",
-                message = "${pattern.label}: $message"
-            )
-            PatternVerification.Error(message)
-        } catch (_: SerializationException) {
-            val message = "Google Flights ha restituito dati in un formato non previsto durante la verifica weekend."
-            diagnostics.log(
-                requestType = "WEEKEND_VERIFY",
-                outcome = "ERROR",
-                message = "${pattern.label}: $message"
-            )
-            PatternVerification.Error(message)
-        } catch (_: Exception) {
-            val message = "Errore imprevisto durante la verifica del weekend."
-            diagnostics.log(
-                requestType = "WEEKEND_VERIFY",
-                outcome = "ERROR",
-                message = "${pattern.label}: $message"
-            )
-            PatternVerification.Error(message)
-        }
-    }
-
-    private fun buildVerificationPatterns(candidate: WeekendCandidate): List<WeekendPattern> {
-        val exploreStart = runCatching { LocalDate.parse(candidate.outboundDate) }.getOrNull()
-            ?: return emptyList()
-        val exploreEnd = runCatching { LocalDate.parse(candidate.returnDate) }.getOrNull()
-            ?: return emptyList()
-        val targetMonth = runCatching {
-            candidate.monthKey.takeIf { it.isNotBlank() }?.let(YearMonth::parse)
-                ?: YearMonth.from(exploreStart)
-        }.getOrElse { YearMonth.from(exploreStart) }
-
-        val monthStart = targetMonth.atDay(1)
-        val monthEnd = targetMonth.atEndOfMonth()
-        val rangeStart = maxOf(exploreStart, monthStart, LocalDate.now())
-        val rangeEnd = minOf(exploreEnd, monthEnd)
-
-        var referenceFriday = if (!rangeStart.isAfter(rangeEnd)) {
-            rangeStart.with(TemporalAdjusters.nextOrSame(DayOfWeek.FRIDAY))
-                .takeIf { !it.isAfter(rangeEnd) }
-        } else {
-            null
-        }
-
-        if (referenceFriday == null) {
-            val midpointDay = ((exploreStart.dayOfMonth + exploreEnd.dayOfMonth) / 2)
-                .coerceIn(1, targetMonth.lengthOfMonth())
-            val midpoint = targetMonth.atDay(midpointDay)
-            val nextFriday = midpoint.with(TemporalAdjusters.nextOrSame(DayOfWeek.FRIDAY))
-            val previousFriday = midpoint.with(TemporalAdjusters.previousOrSame(DayOfWeek.FRIDAY))
-            referenceFriday = listOf(previousFriday, nextFriday)
-                .filter { YearMonth.from(it) == targetMonth && !it.isBefore(LocalDate.now()) }
-                .minByOrNull { kotlin.math.abs(it.toEpochDay() - midpoint.toEpochDay()) }
-        }
-
-        val friday = referenceFriday ?: return emptyList()
-        val saturday = friday.plusDays(1)
-        val sunday = friday.plusDays(2)
-        val monday = friday.plusDays(3)
-
-        return buildList {
-            if (YearMonth.from(friday) == targetMonth && YearMonth.from(sunday) == targetMonth) {
-                add(
-                    WeekendPattern(
-                        label = "Venerdì sera → domenica sera",
-                        outboundDate = friday,
-                        returnDate = sunday,
-                        outboundTimes = FRIDAY_OUTBOUND_TIMES,
-                        returnTimes = SUNDAY_RETURN_TIMES,
-                        returnWindowLabel = "Domenica sera, 17:00–23:59"
-                    )
-                )
-            }
-            if (YearMonth.from(saturday) == targetMonth && YearMonth.from(monday) == targetMonth) {
-                add(
-                    WeekendPattern(
-                        label = "Sabato mattina → lunedì",
-                        outboundDate = saturday,
-                        returnDate = monday,
-                        outboundTimes = SATURDAY_OUTBOUND_TIMES,
-                        returnTimes = MONDAY_RETURN_TIMES,
-                        returnWindowLabel = "Lunedì, tutta la giornata"
-                    )
-                )
-            }
         }
     }
 
@@ -773,35 +559,6 @@ class WeekendSearchRepository(
         )
     }
 
-    private fun FlightOptionDto.toVerifiedWeekendResult(
-        pattern: WeekendPattern,
-        currency: String,
-        searchesLeftBeforeVerification: Int
-    ): VerifiedWeekendResult {
-        val firstSegment = flights.first()
-        val lastSegment = flights.last()
-        val airlineNames = flights
-            .mapNotNull { it.airline?.trim()?.takeIf(String::isNotEmpty) }
-            .distinct()
-            .joinToString(" / ")
-            .ifBlank { "Compagnia non disponibile" }
-
-        return VerifiedWeekendResult(
-            patternLabel = pattern.label,
-            outboundDate = pattern.outboundDate.toString(),
-            returnDate = pattern.returnDate.toString(),
-            price = requireNotNull(price),
-            currency = currency,
-            airlines = airlineNames,
-            outboundDepartureTime = firstSegment.departureAirport?.time ?: "Orario non disponibile",
-            outboundArrivalTime = lastSegment.arrivalAirport?.time ?: "Orario non disponibile",
-            outboundStops = layovers.size,
-            returnWindowLabel = pattern.returnWindowLabel,
-            searchesLeftBeforeVerification = searchesLeftBeforeVerification,
-            verifiedAtEpochMillis = System.currentTimeMillis()
-        )
-    }
-
     private suspend fun saveCache(
         cacheKey: String,
         departureId: String,
@@ -883,24 +640,16 @@ class WeekendSearchRepository(
             "authentication" in normalized
     }
 
-    private data class WeekendPattern(
-        val label: String,
-        val outboundDate: LocalDate,
-        val returnDate: LocalDate,
-        val outboundTimes: String,
-        val returnTimes: String,
-        val returnWindowLabel: String
-    )
-
-    private sealed interface PatternVerification {
-        data class Success(val result: VerifiedWeekendResult) : PatternVerification
-        data object Empty : PatternVerification
-        data class Error(val message: String) : PatternVerification
-    }
-
     private sealed interface VerificationPhase {
-        data class Success(val candidates: List<WeekendCandidate>) : VerificationPhase
-        data class Unavailable(val message: String) : VerificationPhase
+        data class Success(
+            val candidates: List<WeekendCandidate>,
+            val fromCache: Boolean = false
+        ) : VerificationPhase
+
+        data class Unavailable(
+            val message: String,
+            val fromCache: Boolean = false
+        ) : VerificationPhase
     }
 
     private sealed interface SingleMonthOutcome {
