@@ -37,6 +37,10 @@ import com.archimedeprojects.volaflex.data.AnywhereWeekendSearchOutcome
 import com.archimedeprojects.volaflex.data.AnywhereWeekendSearchRepository
 import com.archimedeprojects.volaflex.data.AnywhereWeekendSearchResult
 import com.archimedeprojects.volaflex.data.ApiKeyStore
+import com.archimedeprojects.volaflex.data.CountryWeekendCandidate
+import com.archimedeprojects.volaflex.data.CountryWeekendSearchOutcome
+import com.archimedeprojects.volaflex.data.CountryWeekendSearchRepository
+import com.archimedeprojects.volaflex.data.CountryWeekendSearchResult
 import com.archimedeprojects.volaflex.data.VerifiedWeekendResult
 import com.archimedeprojects.volaflex.data.WeekendCandidate
 import com.archimedeprojects.volaflex.data.WeekendMonthRequest
@@ -44,6 +48,8 @@ import com.archimedeprojects.volaflex.data.WeekendSearchOutcome
 import com.archimedeprojects.volaflex.data.WeekendSearchRepository
 import com.archimedeprojects.volaflex.data.WeekendSearchResult
 import com.archimedeprojects.volaflex.data.local.AirportDirectory
+import com.archimedeprojects.volaflex.data.local.CountryArea
+import com.archimedeprojects.volaflex.data.local.CountryAreaCatalog
 import java.time.Instant
 import java.time.LocalDate
 import java.time.YearMonth
@@ -63,7 +69,8 @@ private data class WeekendPeriodOption(
 
 private enum class WeekendDestinationChoice {
     AIRPORT,
-    ANYWHERE
+    ANYWHERE,
+    COUNTRY
 }
 
 private sealed interface WeekendUiState {
@@ -72,6 +79,7 @@ private sealed interface WeekendUiState {
     data class IataWarning(val text: String) : WeekendUiState
     data class AirportSuccess(val result: WeekendSearchResult) : WeekendUiState
     data class AnywhereSuccess(val result: AnywhereWeekendSearchResult) : WeekendUiState
+    data class CountrySuccess(val result: CountryWeekendSearchResult) : WeekendUiState
     data class Message(
         val text: String,
         val showSettingsButton: Boolean = false
@@ -83,11 +91,13 @@ fun WeekendSearchScreen(
     apiKeyStore: ApiKeyStore,
     repository: WeekendSearchRepository,
     anywhereRepository: AnywhereWeekendSearchRepository,
+    countryRepository: CountryWeekendSearchRepository,
     onOpenFixedDates: () -> Unit,
     onOpenSettings: () -> Unit,
     onBackHome: () -> Unit
 ) {
     val periodOptions = remember { buildWeekendPeriodOptions(LocalDate.now()) }
+    val countries = remember { CountryAreaCatalog.all }
     var selectedPeriod by remember {
         mutableStateOf(periodOptions.getOrElse(1) { periodOptions.first() })
     }
@@ -95,6 +105,10 @@ fun WeekendSearchScreen(
     val departureInputs = remember { mutableStateListOf("") }
     var arrivalInput by remember { mutableStateOf("") }
     var destinationChoice by remember { mutableStateOf(WeekendDestinationChoice.AIRPORT) }
+    var selectedCountry by remember {
+        mutableStateOf(CountryAreaCatalog.byIso2("FR") ?: countries.first())
+    }
+    var countryMenuExpanded by remember { mutableStateOf(false) }
     var uiState by remember { mutableStateOf<WeekendUiState>(WeekendUiState.Idle) }
     val scope = rememberCoroutineScope()
 
@@ -103,17 +117,12 @@ fun WeekendSearchScreen(
         .filter { it.isNotBlank() }
 
     val executeSearch: (Boolean) -> Unit = { forceRefresh ->
-        val origins = normalizedOrigins()
-            .distinct()
-            .sorted()
+        val origins = normalizedOrigins().distinct().sorted()
         val departure = origins.joinToString(",")
         val arrival = arrivalInput.trim().uppercase(Locale.ROOT)
 
         scope.launch {
-            val apiKey = runCatching {
-                apiKeyStore.getSerpApiKey()
-            }.getOrNull()
-
+            val apiKey = runCatching { apiKeyStore.getSerpApiKey() }.getOrNull()
             if (apiKey.isNullOrBlank()) {
                 uiState = WeekendUiState.Message(
                     text = "SerpApi non è configurata. Salva prima la API key nelle Impostazioni.",
@@ -123,7 +132,6 @@ fun WeekendSearchScreen(
             }
 
             uiState = WeekendUiState.Loading
-
             uiState = when (destinationChoice) {
                 WeekendDestinationChoice.AIRPORT -> {
                     when (
@@ -138,8 +146,8 @@ fun WeekendSearchScreen(
                         is WeekendSearchOutcome.Success -> WeekendUiState.AirportSuccess(outcome.result)
                         is WeekendSearchOutcome.Blocked -> WeekendUiState.Message(outcome.message)
                         is WeekendSearchOutcome.Error -> WeekendUiState.Message(
-                            text = outcome.message,
-                            showSettingsButton = outcome.suggestSettings
+                            outcome.message,
+                            outcome.suggestSettings
                         )
                     }
                 }
@@ -153,13 +161,30 @@ fun WeekendSearchScreen(
                             forceRefresh = forceRefresh
                         )
                     ) {
-                        is AnywhereWeekendSearchOutcome.Success -> {
-                            WeekendUiState.AnywhereSuccess(outcome.result)
-                        }
+                        is AnywhereWeekendSearchOutcome.Success -> WeekendUiState.AnywhereSuccess(outcome.result)
                         is AnywhereWeekendSearchOutcome.Blocked -> WeekendUiState.Message(outcome.message)
                         is AnywhereWeekendSearchOutcome.Error -> WeekendUiState.Message(
-                            text = outcome.message,
-                            showSettingsButton = outcome.suggestSettings
+                            outcome.message,
+                            outcome.suggestSettings
+                        )
+                    }
+                }
+
+                WeekendDestinationChoice.COUNTRY -> {
+                    when (
+                        val outcome = countryRepository.search(
+                            apiKey = apiKey,
+                            departureIds = origins,
+                            country = selectedCountry,
+                            months = selectedPeriod.months,
+                            forceRefresh = forceRefresh
+                        )
+                    ) {
+                        is CountryWeekendSearchOutcome.Success -> WeekendUiState.CountrySuccess(outcome.result)
+                        is CountryWeekendSearchOutcome.Blocked -> WeekendUiState.Message(outcome.message)
+                        is CountryWeekendSearchOutcome.Error -> WeekendUiState.Message(
+                            outcome.message,
+                            outcome.suggestSettings
                         )
                     }
                 }
@@ -180,25 +205,22 @@ fun WeekendSearchScreen(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.spacedBy(10.dp)
         ) {
-            OutlinedButton(
-                onClick = onOpenFixedDates,
-                modifier = Modifier.weight(1f)
-            ) {
+            OutlinedButton(onClick = onOpenFixedDates, modifier = Modifier.weight(1f)) {
                 Text("Date fisse")
             }
-            Button(
-                onClick = {},
-                modifier = Modifier.weight(1f)
-            ) {
+            Button(onClick = {}, modifier = Modifier.weight(1f)) {
                 Text("Weekend")
             }
         }
 
         Text(
-            text = if (destinationChoice == WeekendDestinationChoice.ANYWHERE) {
-                "v3.4: Travel Explore scopre destinazioni weekend economiche senza una destinazione prefissata. I risultati sono solo Discovery indicativa: nessuna verifica Google Flights viene fatta in questo step."
-            } else {
-                "Travel Explore trova il candidato economico; Google Flights verifica poi solo quel weekend con le fasce venerdì sera/sabato mattina → domenica sera/lunedì."
+            text = when (destinationChoice) {
+                WeekendDestinationChoice.AIRPORT ->
+                    "Travel Explore trova il candidato economico; Google Flights verifica poi solo quel weekend con le fasce venerdì sera/sabato mattina → domenica sera/lunedì."
+                WeekendDestinationChoice.ANYWHERE ->
+                    "Travel Explore scopre destinazioni weekend economiche senza una destinazione prefissata. Discovery indicativa: nessuna verifica Google Flights in questo step."
+                WeekendDestinationChoice.COUNTRY ->
+                    "v3.5: Travel Explore limita la Discovery al paese selezionato tramite arrival_area_id. I risultati restano indicativi e non vengono ancora verificati con Google Flights."
             },
             style = MaterialTheme.typography.bodyMedium
         )
@@ -248,63 +270,92 @@ fun WeekendSearchScreen(
         Text("Destinazione", style = MaterialTheme.typography.titleMedium)
         Row(
             modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
+            horizontalArrangement = Arrangement.spacedBy(6.dp)
         ) {
-            if (destinationChoice == WeekendDestinationChoice.AIRPORT) {
-                Button(onClick = {}, modifier = Modifier.weight(1f)) {
-                    Text("Aeroporto singolo")
-                }
-            } else {
-                OutlinedButton(
-                    onClick = {
-                        destinationChoice = WeekendDestinationChoice.AIRPORT
-                        uiState = WeekendUiState.Idle
-                    },
-                    modifier = Modifier.weight(1f)
-                ) {
-                    Text("Aeroporto singolo")
-                }
+            DestinationChoiceButton(
+                label = "Aeroporto",
+                selected = destinationChoice == WeekendDestinationChoice.AIRPORT,
+                modifier = Modifier.weight(1f)
+            ) {
+                destinationChoice = WeekendDestinationChoice.AIRPORT
+                uiState = WeekendUiState.Idle
             }
-
-            if (destinationChoice == WeekendDestinationChoice.ANYWHERE) {
-                Button(onClick = {}, modifier = Modifier.weight(1f)) {
-                    Text("Ovunque")
-                }
-            } else {
-                OutlinedButton(
-                    onClick = {
-                        destinationChoice = WeekendDestinationChoice.ANYWHERE
-                        uiState = WeekendUiState.Idle
-                    },
-                    modifier = Modifier.weight(1f)
-                ) {
-                    Text("Ovunque")
-                }
+            DestinationChoiceButton(
+                label = "Ovunque",
+                selected = destinationChoice == WeekendDestinationChoice.ANYWHERE,
+                modifier = Modifier.weight(1f)
+            ) {
+                destinationChoice = WeekendDestinationChoice.ANYWHERE
+                uiState = WeekendUiState.Idle
+            }
+            DestinationChoiceButton(
+                label = "Paese",
+                selected = destinationChoice == WeekendDestinationChoice.COUNTRY,
+                modifier = Modifier.weight(1f)
+            ) {
+                destinationChoice = WeekendDestinationChoice.COUNTRY
+                uiState = WeekendUiState.Idle
             }
         }
 
-        if (destinationChoice == WeekendDestinationChoice.AIRPORT) {
-            OutlinedTextField(
-                value = arrivalInput,
-                onValueChange = {
-                    arrivalInput = it
-                    if (uiState is WeekendUiState.IataWarning) uiState = WeekendUiState.Idle
-                },
-                modifier = Modifier.fillMaxWidth(),
-                label = { Text("Destinazione (es. MAD)") },
-                singleLine = true,
-                keyboardOptions = KeyboardOptions(
-                    capitalization = KeyboardCapitalization.Characters,
-                    keyboardType = KeyboardType.Ascii
+        when (destinationChoice) {
+            WeekendDestinationChoice.AIRPORT -> {
+                OutlinedTextField(
+                    value = arrivalInput,
+                    onValueChange = {
+                        arrivalInput = it
+                        if (uiState is WeekendUiState.IataWarning) uiState = WeekendUiState.Idle
+                    },
+                    modifier = Modifier.fillMaxWidth(),
+                    label = { Text("Destinazione (es. MAD)") },
+                    singleLine = true,
+                    keyboardOptions = KeyboardOptions(
+                        capitalization = KeyboardCapitalization.Characters,
+                        keyboardType = KeyboardType.Ascii
+                    )
                 )
-            )
-        } else {
-            Card(modifier = Modifier.fillMaxWidth()) {
-                Text(
-                    text = "Ovunque = nessun arrival_id e nessun arrival_area_id. Explore restituisce una lista di destinazioni candidate; non significa scansione esaustiva di ogni aeroporto del mondo.",
-                    modifier = Modifier.padding(14.dp),
-                    style = MaterialTheme.typography.bodySmall
-                )
+            }
+            WeekendDestinationChoice.ANYWHERE -> {
+                Card(modifier = Modifier.fillMaxWidth()) {
+                    Text(
+                        "Ovunque = nessun arrival_id e nessun arrival_area_id. Explore restituisce una lista di candidati, non una scansione esaustiva di ogni aeroporto del mondo.",
+                        modifier = Modifier.padding(14.dp),
+                        style = MaterialTheme.typography.bodySmall
+                    )
+                }
+            }
+            WeekendDestinationChoice.COUNTRY -> {
+                Text("Paese di destinazione", style = MaterialTheme.typography.labelLarge)
+                Box(modifier = Modifier.fillMaxWidth()) {
+                    OutlinedButton(
+                        onClick = { countryMenuExpanded = true },
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text("${selectedCountry.name} (${selectedCountry.iso2})")
+                    }
+                    DropdownMenu(
+                        expanded = countryMenuExpanded,
+                        onDismissRequest = { countryMenuExpanded = false }
+                    ) {
+                        countries.forEach { country ->
+                            DropdownMenuItem(
+                                text = { Text("${country.name} (${country.iso2})") },
+                                onClick = {
+                                    selectedCountry = country
+                                    countryMenuExpanded = false
+                                    uiState = WeekendUiState.Idle
+                                }
+                            )
+                        }
+                    }
+                }
+                Card(modifier = Modifier.fillMaxWidth()) {
+                    Text(
+                        "Paese = arrival_area_id=${selectedCountry.kgmid}; arrival_id viene omesso. Il catalogo è locale, quindi la selezione non usa rete né quota.",
+                        modifier = Modifier.padding(14.dp),
+                        style = MaterialTheme.typography.bodySmall
+                    )
+                }
             }
         }
 
@@ -316,7 +367,6 @@ fun WeekendSearchScreen(
             ) {
                 Text(selectedPeriod.label)
             }
-
             DropdownMenu(
                 expanded = periodMenuExpanded,
                 onDismissRequest = { periodMenuExpanded = false }
@@ -335,10 +385,11 @@ fun WeekendSearchScreen(
         }
 
         Text(
-            text = if (destinationChoice == WeekendDestinationChoice.ANYWHERE) {
-                "Costo massimo su cache miss: ${selectedPeriod.months.size} query Travel Explore. Nessuna verifica Google Flights in v3.4. Account API gratuita."
-            } else {
-                "Costo massimo su cache miss: ${selectedPeriod.months.size} query Explore + fino a 2 query Google Flights. I controlli Account API sono gratuiti."
+            text = when (destinationChoice) {
+                WeekendDestinationChoice.AIRPORT ->
+                    "Costo massimo su cache miss: ${selectedPeriod.months.size} query Explore + fino a 2 Google Flights. Account API gratuita."
+                WeekendDestinationChoice.ANYWHERE, WeekendDestinationChoice.COUNTRY ->
+                    "Costo massimo su cache miss: ${selectedPeriod.months.size} query Travel Explore. Nessuna verifica Google Flights in questa Discovery. Account API gratuita."
             },
             style = MaterialTheme.typography.bodySmall
         )
@@ -347,30 +398,22 @@ fun WeekendSearchScreen(
             onClick = {
                 val originsRaw = normalizedOrigins()
                 val arrival = arrivalInput.trim().uppercase(Locale.ROOT)
-
                 when {
-                    originsRaw.size != departureInputs.size -> {
+                    originsRaw.size != departureInputs.size ->
                         uiState = WeekendUiState.Message("Compila tutti gli aeroporti di partenza aggiunti.")
-                    }
-                    originsRaw.distinct().size != originsRaw.size -> {
+                    originsRaw.distinct().size != originsRaw.size ->
                         uiState = WeekendUiState.Message("Gli aeroporti di partenza devono essere diversi tra loro.")
-                    }
-                    destinationChoice == WeekendDestinationChoice.AIRPORT && arrival.isBlank() -> {
+                    destinationChoice == WeekendDestinationChoice.AIRPORT && arrival.isBlank() ->
                         uiState = WeekendUiState.Message("Inserisci la destinazione.")
-                    }
-                    destinationChoice == WeekendDestinationChoice.AIRPORT && arrival in originsRaw -> {
+                    destinationChoice == WeekendDestinationChoice.AIRPORT && arrival in originsRaw ->
                         uiState = WeekendUiState.Message("La destinazione non può coincidere con uno degli aeroporti di partenza.")
-                    }
                     else -> {
                         val codesToCheck = if (destinationChoice == WeekendDestinationChoice.AIRPORT) {
                             originsRaw + arrival
                         } else {
                             originsRaw
                         }
-                        val unknownCodes = codesToCheck
-                            .distinct()
-                            .filterNot(AirportDirectory::isKnown)
-
+                        val unknownCodes = codesToCheck.distinct().filterNot(AirportDirectory::isKnown)
                         if (unknownCodes.isNotEmpty()) {
                             val codes = unknownCodes.joinToString("', '")
                             uiState = WeekendUiState.IataWarning(
@@ -386,10 +429,10 @@ fun WeekendSearchScreen(
             modifier = Modifier.fillMaxWidth()
         ) {
             Text(
-                if (destinationChoice == WeekendDestinationChoice.ANYWHERE) {
-                    "Scopri weekend Ovunque"
-                } else {
-                    "Cerca weekend economici"
+                when (destinationChoice) {
+                    WeekendDestinationChoice.AIRPORT -> "Cerca weekend economici"
+                    WeekendDestinationChoice.ANYWHERE -> "Scopri weekend Ovunque"
+                    WeekendDestinationChoice.COUNTRY -> "Scopri weekend in ${selectedCountry.name}"
                 }
             )
         }
@@ -404,10 +447,10 @@ fun WeekendSearchScreen(
                 ) {
                     CircularProgressIndicator()
                     Text(
-                        if (destinationChoice == WeekendDestinationChoice.ANYWHERE) {
-                            "Discovery Travel Explore Ovunque in corso…"
-                        } else {
-                            "Discovery Explore e verifica Google Flights in corso…"
+                        when (destinationChoice) {
+                            WeekendDestinationChoice.AIRPORT -> "Discovery Explore e verifica Google Flights in corso…"
+                            WeekendDestinationChoice.ANYWHERE -> "Discovery Travel Explore Ovunque in corso…"
+                            WeekendDestinationChoice.COUNTRY -> "Discovery Travel Explore ${selectedCountry.name} in corso…"
                         }
                     )
                 }
@@ -424,15 +467,11 @@ fun WeekendSearchScreen(
                             OutlinedButton(
                                 onClick = { uiState = WeekendUiState.Idle },
                                 modifier = Modifier.weight(1f)
-                            ) {
-                                Text("Correggi")
-                            }
+                            ) { Text("Correggi") }
                             Button(
                                 onClick = { executeSearch(false) },
                                 modifier = Modifier.weight(1f)
-                            ) {
-                                Text("Cerca comunque")
-                            }
+                            ) { Text("Cerca comunque") }
                         }
                     }
                 }
@@ -445,25 +484,23 @@ fun WeekendSearchScreen(
                     ) {
                         Text(state.text)
                         if (state.showSettingsButton) {
-                            Button(onClick = onOpenSettings) {
-                                Text("Vai a Impostazioni")
-                            }
+                            Button(onClick = onOpenSettings) { Text("Vai a Impostazioni") }
                         }
                     }
                 }
             }
-            is WeekendUiState.AirportSuccess -> {
-                WeekendResultsCard(
-                    result = state.result,
-                    onForceRefresh = { executeSearch(true) }
-                )
-            }
-            is WeekendUiState.AnywhereSuccess -> {
-                AnywhereWeekendResultsCard(
-                    result = state.result,
-                    onForceRefresh = { executeSearch(true) }
-                )
-            }
+            is WeekendUiState.AirportSuccess -> WeekendResultsCard(
+                result = state.result,
+                onForceRefresh = { executeSearch(true) }
+            )
+            is WeekendUiState.AnywhereSuccess -> AnywhereWeekendResultsCard(
+                result = state.result,
+                onForceRefresh = { executeSearch(true) }
+            )
+            is WeekendUiState.CountrySuccess -> CountryWeekendResultsCard(
+                result = state.result,
+                onForceRefresh = { executeSearch(true) }
+            )
         }
 
         TextButton(
@@ -471,6 +508,79 @@ fun WeekendSearchScreen(
             modifier = Modifier.align(Alignment.CenterHorizontally)
         ) {
             Text("Torna alla Home")
+        }
+    }
+}
+
+@Composable
+private fun DestinationChoiceButton(
+    label: String,
+    selected: Boolean,
+    modifier: Modifier,
+    onClick: () -> Unit
+) {
+    if (selected) {
+        Button(onClick = onClick, modifier = modifier) { Text(label) }
+    } else {
+        OutlinedButton(onClick = onClick, modifier = modifier) { Text(label) }
+    }
+}
+
+@Composable
+private fun CountryWeekendResultsCard(
+    result: CountryWeekendSearchResult,
+    onForceRefresh: () -> Unit
+) {
+    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        Card(modifier = Modifier.fillMaxWidth()) {
+            Column(
+                modifier = Modifier.padding(16.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Text("Discovery Paese — non verificata", style = MaterialTheme.typography.headlineSmall)
+                Text("Limitata a: ${result.selectedCountry.name} (${result.selectedCountry.iso2})")
+                Text("I candidati sono indicativi di Travel Explore; v3.5 non esegue ancora Google Flights preciso.")
+                if (result.fromCache && result.cachedAtEpochMillis != null) {
+                    val cacheTime = Instant.ofEpochMilli(result.cachedAtEpochMillis)
+                        .atZone(ZoneId.systemDefault())
+                        .format(weekendTimeFormatter)
+                    Text(
+                        "Risultato da cache — aggiornato alle $cacheTime. 0 nuove query.",
+                        style = MaterialTheme.typography.labelLarge
+                    )
+                } else {
+                    Text("Quota SerpApi live prima della Discovery: ${result.searchesLeftBeforeSearch} rimaste")
+                    Text("Richieste Travel Explore di questo run: ${result.exploreRequests}")
+                }
+                Text(
+                    "Una risposta vuota/anomala non viene interpretata automaticamente come assenza di voli: controlla Diagnostica per la classificazione precisa.",
+                    style = MaterialTheme.typography.bodySmall
+                )
+                if (result.fromCache) {
+                    OutlinedButton(
+                        onClick = onForceRefresh,
+                        modifier = Modifier.fillMaxWidth()
+                    ) { Text("Aggiorna comunque (usa nuove query)") }
+                }
+            }
+        }
+        result.candidates.forEach { CountryWeekendCandidateCard(it) }
+    }
+}
+
+@Composable
+private fun CountryWeekendCandidateCard(candidate: CountryWeekendCandidate) {
+    Card(modifier = Modifier.fillMaxWidth()) {
+        Column(
+            modifier = Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp)
+        ) {
+            Text(candidate.city, style = MaterialTheme.typography.titleLarge)
+            Text("Paese: ${candidate.country}")
+            Text("Aeroporto: ${candidate.airportIata} — ${candidate.airportName}")
+            Text("Periodo Explore: ${formatWeekendDate(candidate.outboundDate)} → ${formatWeekendDate(candidate.returnDate)}")
+            Text("Prezzo indicativo: ${candidate.price} ${candidate.currency}", style = MaterialTheme.typography.titleMedium)
+            Text(candidate.monthLabel, style = MaterialTheme.typography.bodySmall)
         }
     }
 }
@@ -487,17 +597,12 @@ private fun AnywhereWeekendResultsCard(
                 verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
                 Text("Discovery Ovunque — non verificata", style = MaterialTheme.typography.headlineSmall)
-                Text(
-                    "Questi sono candidati indicativi di Travel Explore. v3.4 non esegue ancora Google Flights preciso."
-                )
+                Text("Questi sono candidati indicativi di Travel Explore. v3.4 non esegue ancora Google Flights preciso.")
                 if (result.fromCache && result.cachedAtEpochMillis != null) {
                     val cacheTime = Instant.ofEpochMilli(result.cachedAtEpochMillis)
                         .atZone(ZoneId.systemDefault())
                         .format(weekendTimeFormatter)
-                    Text(
-                        "Risultato da cache — aggiornato alle $cacheTime. 0 nuove query.",
-                        style = MaterialTheme.typography.labelLarge
-                    )
+                    Text("Risultato da cache — aggiornato alle $cacheTime. 0 nuove query.", style = MaterialTheme.typography.labelLarge)
                 } else {
                     Text("Quota SerpApi live prima della Discovery: ${result.searchesLeftBeforeSearch} rimaste")
                     Text("Richieste Travel Explore di questo run: ${result.exploreRequests}")
@@ -507,37 +612,25 @@ private fun AnywhereWeekendResultsCard(
                     style = MaterialTheme.typography.bodySmall
                 )
                 if (result.fromCache) {
-                    OutlinedButton(
-                        onClick = onForceRefresh,
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
+                    OutlinedButton(onClick = onForceRefresh, modifier = Modifier.fillMaxWidth()) {
                         Text("Aggiorna comunque (usa nuove query)")
                     }
                 }
             }
         }
-
-        result.candidates.forEach { candidate ->
-            AnywhereWeekendCandidateCard(candidate)
-        }
+        result.candidates.forEach { AnywhereWeekendCandidateCard(it) }
     }
 }
 
 @Composable
 private fun AnywhereWeekendCandidateCard(candidate: AnywhereWeekendCandidate) {
     Card(modifier = Modifier.fillMaxWidth()) {
-        Column(
-            modifier = Modifier.padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(6.dp)
-        ) {
+        Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
             Text(candidate.city, style = MaterialTheme.typography.titleLarge)
             Text("Paese: ${candidate.country}")
             Text("Aeroporto: ${candidate.airportIata} — ${candidate.airportName}")
             Text("Periodo Explore: ${formatWeekendDate(candidate.outboundDate)} → ${formatWeekendDate(candidate.returnDate)}")
-            Text(
-                "Prezzo indicativo: ${candidate.price} ${candidate.currency}",
-                style = MaterialTheme.typography.titleMedium
-            )
+            Text("Prezzo indicativo: ${candidate.price} ${candidate.currency}", style = MaterialTheme.typography.titleMedium)
             Text(candidate.monthLabel, style = MaterialTheme.typography.bodySmall)
         }
     }
@@ -550,73 +643,43 @@ private fun WeekendResultsCard(
 ) {
     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
         result.verifiedWeekend?.let { verified ->
-            VerifiedWeekendCard(
-                result = verified,
-                fromCache = result.verificationFromCache
-            )
+            VerifiedWeekendCard(verified, result.verificationFromCache)
         }
-
         if (result.verificationMessage != null) {
             Card(modifier = Modifier.fillMaxWidth()) {
-                Column(
-                    modifier = Modifier.padding(16.dp),
-                    verticalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
+                Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Text("Verifica non completata", style = MaterialTheme.typography.titleMedium)
                     Text(result.verificationMessage)
-                    Text(
-                        "I candidati Explore sotto restano solo indicativi.",
-                        style = MaterialTheme.typography.bodySmall
-                    )
+                    Text("I candidati Explore sotto restano solo indicativi.", style = MaterialTheme.typography.bodySmall)
                 }
             }
         }
-
         Card(modifier = Modifier.fillMaxWidth()) {
-            Column(
-                modifier = Modifier.padding(16.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
+            Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text("Discovery Travel Explore", style = MaterialTheme.typography.titleMedium)
-
                 if (result.fromCache && result.cachedAtEpochMillis != null) {
                     val cacheTime = Instant.ofEpochMilli(result.cachedAtEpochMillis)
                         .atZone(ZoneId.systemDefault())
                         .format(weekendTimeFormatter)
-                    Text(
-                        "Discovery da cache — aggiornata alle $cacheTime",
-                        style = MaterialTheme.typography.labelLarge
-                    )
+                    Text("Discovery da cache — aggiornata alle $cacheTime", style = MaterialTheme.typography.labelLarge)
                 } else {
                     Text("Quota verificata prima della Discovery: ${result.searchesLeftBeforeSearch} rimaste")
                 }
-
                 if (result.verificationFromCache) {
-                    Text(
-                        "Anche la verifica Google Flights proviene dalla cache locale.",
-                        style = MaterialTheme.typography.labelLarge
-                    )
+                    Text("Anche la verifica Google Flights proviene dalla cache locale.", style = MaterialTheme.typography.labelLarge)
                 }
-
                 Text(
                     "Explore è usato solo per scegliere il weekend promettente: le sue date possono essere più lunghe del weekend breve desiderato.",
                     style = MaterialTheme.typography.bodySmall
                 )
-
                 if (result.fromCache) {
-                    OutlinedButton(
-                        onClick = onForceRefresh,
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
+                    OutlinedButton(onClick = onForceRefresh, modifier = Modifier.fillMaxWidth()) {
                         Text("Aggiorna comunque (usa nuove query)")
                     }
                 }
             }
         }
-
-        result.candidates.forEach { candidate ->
-            WeekendCandidateCard(candidate)
-        }
+        result.candidates.forEach { WeekendCandidateCard(it) }
     }
 }
 
@@ -626,16 +689,10 @@ private fun VerifiedWeekendCard(
     fromCache: Boolean
 ) {
     Card(modifier = Modifier.fillMaxWidth()) {
-        Column(
-            modifier = Modifier.padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(7.dp)
-        ) {
+        Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(7.dp)) {
             Text("Weekend verificato ✓", style = MaterialTheme.typography.headlineSmall)
             if (fromCache) {
-                Text(
-                    "Verifica riutilizzata dalla cache locale — 0 nuove query.",
-                    style = MaterialTheme.typography.labelLarge
-                )
+                Text("Verifica riutilizzata dalla cache locale — 0 nuove query.", style = MaterialTheme.typography.labelLarge)
             }
             Text(result.patternLabel, style = MaterialTheme.typography.titleMedium)
             Text("Andata: ${formatWeekendDate(result.outboundDate)}")
@@ -645,10 +702,7 @@ private fun VerifiedWeekendCard(
             Text("Fascia ritorno verificata: ${result.returnWindowLabel}")
             Text("Compagnia (andata): ${result.airlines}")
             Text("Scali (andata): ${result.outboundStops}")
-            Text(
-                "Prezzo round-trip verificato: ${result.price} ${result.currency}",
-                style = MaterialTheme.typography.titleLarge
-            )
+            Text("Prezzo round-trip verificato: ${result.price} ${result.currency}", style = MaterialTheme.typography.titleLarge)
             Text("Quota live prima della fase di verifica: ${result.searchesLeftBeforeVerification} rimaste")
             Text(
                 "Nota: la query round-trip applica anche la fascia del ritorno, ma il dettaglio esatto del volo di ritorno richiede departure_token e non viene ancora scaricato per risparmiare quota.",
@@ -661,22 +715,13 @@ private fun VerifiedWeekendCard(
 @Composable
 private fun WeekendCandidateCard(candidate: WeekendCandidate) {
     Card(modifier = Modifier.fillMaxWidth()) {
-        Column(
-            modifier = Modifier.padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(6.dp)
-        ) {
+        Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
             Text(candidate.monthLabel, style = MaterialTheme.typography.titleMedium)
             Text("Destinazione: ${candidate.destinationName} (${candidate.destinationIata})")
             Text("Range indicativo Explore: ${formatWeekendDate(candidate.outboundDate)} → ${formatWeekendDate(candidate.returnDate)}")
-            Text(
-                "Prezzo indicativo Explore: ${candidate.price} ${candidate.currency}",
-                style = MaterialTheme.typography.titleMedium
-            )
+            Text("Prezzo indicativo Explore: ${candidate.price} ${candidate.currency}", style = MaterialTheme.typography.titleMedium)
             if (candidate.verification != null) {
-                Text(
-                    "Candidato scelto per la verifica precisa ✓",
-                    style = MaterialTheme.typography.labelLarge
-                )
+                Text("Candidato scelto per la verifica precisa ✓", style = MaterialTheme.typography.labelLarge)
             }
         }
     }
@@ -684,39 +729,22 @@ private fun WeekendCandidateCard(candidate: WeekendCandidate) {
 
 private fun buildWeekendPeriodOptions(today: LocalDate): List<WeekendPeriodOption> {
     val currentMonth = YearMonth.from(today)
-    val monthRequests = (0L..5L).map { offset ->
-        currentMonth.plusMonths(offset).toWeekendMonthRequest()
-    }
-
+    val monthRequests = (0L..5L).map { offset -> currentMonth.plusMonths(offset).toWeekendMonthRequest() }
     val singleMonths = monthRequests.map { month ->
-        WeekendPeriodOption(
-            label = month.label,
-            months = listOf(month)
-        )
+        WeekendPeriodOption(label = month.label, months = listOf(month))
     }
-
     return singleMonths + listOf(
-        WeekendPeriodOption(
-            label = "Prossimi 2 mesi",
-            months = monthRequests.take(2)
-        ),
-        WeekendPeriodOption(
-            label = "Prossimi 3 mesi",
-            months = monthRequests.take(3)
-        )
+        WeekendPeriodOption("Prossimi 2 mesi", monthRequests.take(2)),
+        WeekendPeriodOption("Prossimi 3 mesi", monthRequests.take(3))
     )
 }
 
-private fun YearMonth.toWeekendMonthRequest(): WeekendMonthRequest {
-    return WeekendMonthRequest(
-        yearMonthKey = toString(),
-        monthNumber = monthValue,
-        label = format(weekendMonthFormatter)
-    )
-}
+private fun YearMonth.toWeekendMonthRequest(): WeekendMonthRequest = WeekendMonthRequest(
+    yearMonthKey = toString(),
+    monthNumber = monthValue,
+    label = format(weekendMonthFormatter)
+)
 
-private fun formatWeekendDate(rawDate: String): String {
-    return runCatching {
-        LocalDate.parse(rawDate).format(weekendDateFormatter)
-    }.getOrDefault(rawDate)
-}
+private fun formatWeekendDate(rawDate: String): String = runCatching {
+    LocalDate.parse(rawDate).format(weekendDateFormatter)
+}.getOrDefault(rawDate)
