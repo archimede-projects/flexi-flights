@@ -1,6 +1,6 @@
 # SESSION_HANDOFF
 
-**Fase attuale:** v3 — Geografia avanzata. **Fase 0, v1 Fondamenta, l'intera v2 Date flessibili, v3.1, v3.2, v3.3, v3.4 e v3.5 sono CHIUSE e validate sul telefono reale.** Il blocco UI scoperto dopo v3.5 è **IMPLEMENTATO, CI verde e Release pubblicata; test telefono pendente**. Non avanzare a v3.6 prima del PASS UI.
+**Fase attuale:** v3 — Geografia avanzata. **Fase 0, v1 Fondamenta, l'intera v2 Date flessibili, v3.1, v3.2, v3.3, v3.4 e v3.5 sono CHIUSE e validate sul telefono reale. Il blocker UI post-v3.5 è CHIUSO E VALIDATO sul telefono reale. Il blocco su v3.6 è rimosso.**
 
 **v3 architettura:** `v3.1 → v3.2 → v3.3 → v3.4 → v3.5 → v3.6 → v3.7`. Origine `Airports(max 3)`; destinazione esclusiva fra `Airports(max 3)`, `Anywhere`, `Country`; no destinazioni composite. Pattern `DISCOVERY → VERIFICA → DETTAGLIO`, cache canonicalizzate, Account API live, niente brute force cartesiano.
 
@@ -24,8 +24,10 @@
 
 **CI fix UI:** run **#31 = SUCCESS**, build **`0.1.0-dev.31`**, commit applicativo `4dddf1195311aa8546eeb26c11e8431f1fd0f30d`; `BUILD SUCCESSFUL in 2m 15s`, 49 task. Firma v2/v3 valida, 1 signer, fingerprint `a1f432f512e3d1867ee4b4535fb06a83fae5413ee700113b34e8b926a2767df3`. APK SHA-256 `8fb7cb81ed0575e1addd5cdd0b2aebd447fc0e1b96d376efc8bef03f10044d65`, size 9,933,187 byte. `dev-latest` aggiornato al commit/run corretti.
 
-**Test telefono richiesto:** installare `0.1.0-dev.31`. Senza lanciare ricerche (quindi zero consumo quota), verificare: 1) Date fisse: `Date fisse | Weekend | N notti` tutte visibili; 2) Weekend+Aeroporto: tre modalità principali visibili + secondario completo, `Aeroporto` su una riga; 3) Weekend+Ovunque idem; 4) Weekend+Paese idem e menu paese leggibile; 5) N notti: tre modalità principali visibili e navigazione Weekend↔N notti funzionante. Se PASS, il blocco UI è chiuso e si può progettare v3.6.
+**Test telefono fix UI — PASS accettato:** build `0.1.0-dev.31`. Test A `Date fisse` PASS: tutte e tre le modalità visibili. Test B `Weekend/Aeroporto` PASS: tutte e tre le modalità visibili e `Aeroporto` su una sola riga. Test E parziale PASS: da Weekend si raggiunge `N notti`, con tutte e tre le modalità visibili e `N notti` attiva. `Weekend/Ovunque` e `Weekend/Paese` **non sono stati riverificati con screenshot dedicati dopo il fix**; rischio residuo accettato come basso perché il selettore principale del Weekend è fuori dal ramo `destinationChoice` e il secondario usa lo stesso `DestinationChoiceButton` per tutte e tre le scelte. **Blocker UI CHIUSO E VALIDATO; v3.6 sbloccata.**
 
-**Non implementato:** v3.6 verifica geografica Weekend; v3.7 integrazione/hardening. Non avanzare a v3.6 finché il fix UI non è validato sul telefono reale.
+**Piano v3.6 — NON IMPLEMENTATO:** per `Ovunque` e `Paese`, dopo Travel Explore ordinare i candidati validi per prezzo e verificare **una sola destinazione: il candidato più economico eleggibile** (IATA/date valide e almeno un pattern weekend ricavabile). Google Flights riceve le origini canonicalizzate e come `arrival_id` esclusivamente l'IATA del candidato scelto. Riutilizzare i due pattern esistenti: venerdì sera→domenica sera e sabato mattina→lunedì; massimo **2 query Google Flights** e scelta del prezzo verificato più basso tra i due pattern. **Nessun fallback automatico alla seconda/terza destinazione** se la verifica fallisce o non trova voli: mantenere la Discovery indicativa e mostrare il motivo, evitando che Ovunque/Paese diventino una scansione. Test tipico su un solo mese/cache miss: **1 Travel Explore + max 2 Google Flights = max 3 query SerpApi di ricerca**, più Account API quota; su N mesi: `N Explore + max 2 Google Flights`. Replay completamente cacheato: 0 query. Riutilizzare quota guard, cache e diagnostica del Weekend esistente.
+
+**Non implementato:** v3.6 verifica geografica Weekend; v3.7 integrazione/hardening. Il prossimo step può essere l'implementazione di v3.6 secondo il piano sopra.
 
 **Regola:** dopo ogni decisione/modifica/step completato aggiornare `PROJECT_SPEC.md` e `SESSION_HANDOFF.md`. Nuova chat: leggere entrambi prima di procedere.
