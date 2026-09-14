@@ -223,9 +223,9 @@ fun WeekendSearchScreen(
                 WeekendDestinationChoice.AIRPORT ->
                     "Travel Explore trova il candidato economico; Google Flights verifica poi solo quel weekend con le fasce venerdì sera/sabato mattina → domenica sera/lunedì."
                 WeekendDestinationChoice.ANYWHERE ->
-                    "Travel Explore scopre destinazioni weekend economiche senza una destinazione prefissata. Discovery indicativa: nessuna verifica Google Flights in questo step."
+                    "Travel Explore scopre destinazioni weekend economiche; v3.6 verifica con Google Flights solo il candidato più economico eleggibile, con massimo 2 pattern e senza passare automaticamente al secondo candidato."
                 WeekendDestinationChoice.COUNTRY ->
-                    "v3.5: Travel Explore limita la Discovery al paese selezionato tramite arrival_area_id. I risultati restano indicativi e non vengono ancora verificati con Google Flights."
+                    "Travel Explore limita la Discovery al paese selezionato; v3.6 verifica con Google Flights solo il candidato più economico eleggibile e confermato localmente nel paese, con massimo 2 pattern."
             },
             style = MaterialTheme.typography.bodyMedium
         )
@@ -323,7 +323,7 @@ fun WeekendSearchScreen(
             WeekendDestinationChoice.ANYWHERE -> {
                 Card(modifier = Modifier.fillMaxWidth()) {
                     Text(
-                        "Ovunque = nessun arrival_id e nessun arrival_area_id. Explore restituisce una lista di candidati, non una scansione esaustiva di ogni aeroporto del mondo.",
+                        "Ovunque = nessun arrival_id e nessun arrival_area_id in Discovery. Solo dopo Explore, la verifica usa arrival_id dell'unico candidato selezionato.",
                         modifier = Modifier.padding(14.dp),
                         style = MaterialTheme.typography.bodySmall
                     )
@@ -356,7 +356,7 @@ fun WeekendSearchScreen(
                 }
                 Card(modifier = Modifier.fillMaxWidth()) {
                     Text(
-                        "Paese = arrival_area_id=${selectedCountry.kgmid}; arrival_id viene omesso. Il catalogo è locale, quindi la selezione non usa rete né quota.",
+                        "Paese = arrival_area_id=${selectedCountry.kgmid} in Discovery. Prima della verifica, l'IATA candidato deve risultare in AirportDirectory con countryCode=${selectedCountry.iso2}; poi Google Flights usa solo quell'arrival_id.",
                         modifier = Modifier.padding(14.dp),
                         style = MaterialTheme.typography.bodySmall
                     )
@@ -394,7 +394,7 @@ fun WeekendSearchScreen(
                 WeekendDestinationChoice.AIRPORT ->
                     "Costo massimo su cache miss: ${selectedPeriod.months.size} query Explore + fino a 2 Google Flights. Account API gratuita."
                 WeekendDestinationChoice.ANYWHERE, WeekendDestinationChoice.COUNTRY ->
-                    "Costo massimo su cache miss: ${selectedPeriod.months.size} query Travel Explore. Nessuna verifica Google Flights in questa Discovery. Account API gratuita."
+                    "Costo massimo su cache miss: ${selectedPeriod.months.size} query Travel Explore + fino a 2 Google Flights sul solo candidato selezionato. Account API gratuita."
             },
             style = MaterialTheme.typography.bodySmall
         )
@@ -436,8 +436,8 @@ fun WeekendSearchScreen(
             Text(
                 when (destinationChoice) {
                     WeekendDestinationChoice.AIRPORT -> "Cerca weekend economici"
-                    WeekendDestinationChoice.ANYWHERE -> "Scopri weekend Ovunque"
-                    WeekendDestinationChoice.COUNTRY -> "Scopri weekend in ${selectedCountry.name}"
+                    WeekendDestinationChoice.ANYWHERE -> "Scopri e verifica weekend Ovunque"
+                    WeekendDestinationChoice.COUNTRY -> "Scopri e verifica weekend in ${selectedCountry.name}"
                 }
             )
         }
@@ -454,8 +454,8 @@ fun WeekendSearchScreen(
                     Text(
                         when (destinationChoice) {
                             WeekendDestinationChoice.AIRPORT -> "Discovery Explore e verifica Google Flights in corso…"
-                            WeekendDestinationChoice.ANYWHERE -> "Discovery Travel Explore Ovunque in corso…"
-                            WeekendDestinationChoice.COUNTRY -> "Discovery Travel Explore ${selectedCountry.name} in corso…"
+                            WeekendDestinationChoice.ANYWHERE -> "Discovery Ovunque e verifica del candidato migliore in corso…"
+                            WeekendDestinationChoice.COUNTRY -> "Discovery ${selectedCountry.name} e verifica del candidato migliore in corso…"
                         }
                     )
                 }
@@ -550,25 +550,38 @@ private fun CountryWeekendResultsCard(
     onForceRefresh: () -> Unit
 ) {
     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        result.verifiedWeekend?.let { verified ->
+            VerifiedWeekendCard(verified, result.verificationFromCache)
+        }
+        result.verificationMessage?.let { message ->
+            GeographicVerificationMessageCard(
+                attemptedIata = result.verificationAttemptedIata,
+                message = message,
+                fromCache = result.verificationFromCache
+            )
+        }
         Card(modifier = Modifier.fillMaxWidth()) {
             Column(
                 modifier = Modifier.padding(16.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                Text("Discovery Paese — non verificata", style = MaterialTheme.typography.headlineSmall)
+                Text("Discovery Paese", style = MaterialTheme.typography.headlineSmall)
                 Text("Limitata a: ${result.selectedCountry.name} (${result.selectedCountry.iso2})")
-                Text("I candidati sono indicativi di Travel Explore; v3.5 non esegue ancora Google Flights preciso.")
+                Text("Travel Explore produce i candidati indicativi; v3.6 verifica al massimo un solo candidato eleggibile con Google Flights.")
                 if (result.fromCache && result.cachedAtEpochMillis != null) {
                     val cacheTime = Instant.ofEpochMilli(result.cachedAtEpochMillis)
                         .atZone(ZoneId.systemDefault())
                         .format(weekendTimeFormatter)
                     Text(
-                        "Risultato da cache — aggiornato alle $cacheTime. 0 nuove query.",
+                        "Discovery da cache — aggiornata alle $cacheTime.",
                         style = MaterialTheme.typography.labelLarge
                     )
                 } else {
                     Text("Quota SerpApi live prima della Discovery: ${result.searchesLeftBeforeSearch} rimaste")
                     Text("Richieste Travel Explore di questo run: ${result.exploreRequests}")
+                }
+                if (result.verificationFromCache) {
+                    Text("Anche l'esito della verifica proviene dalla cache locale.", style = MaterialTheme.typography.labelLarge)
                 }
                 Text(
                     "Una risposta vuota/anomala non viene interpretata automaticamente come assenza di voli: controlla Diagnostica per la classificazione precisa.",
@@ -609,21 +622,34 @@ private fun AnywhereWeekendResultsCard(
     onForceRefresh: () -> Unit
 ) {
     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        result.verifiedWeekend?.let { verified ->
+            VerifiedWeekendCard(verified, result.verificationFromCache)
+        }
+        result.verificationMessage?.let { message ->
+            GeographicVerificationMessageCard(
+                attemptedIata = result.verificationAttemptedIata,
+                message = message,
+                fromCache = result.verificationFromCache
+            )
+        }
         Card(modifier = Modifier.fillMaxWidth()) {
             Column(
                 modifier = Modifier.padding(16.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                Text("Discovery Ovunque — non verificata", style = MaterialTheme.typography.headlineSmall)
-                Text("Questi sono candidati indicativi di Travel Explore. v3.4 non esegue ancora Google Flights preciso.")
+                Text("Discovery Ovunque", style = MaterialTheme.typography.headlineSmall)
+                Text("Travel Explore produce i candidati indicativi; v3.6 verifica al massimo un solo candidato eleggibile con Google Flights.")
                 if (result.fromCache && result.cachedAtEpochMillis != null) {
                     val cacheTime = Instant.ofEpochMilli(result.cachedAtEpochMillis)
                         .atZone(ZoneId.systemDefault())
                         .format(weekendTimeFormatter)
-                    Text("Risultato da cache — aggiornato alle $cacheTime. 0 nuove query.", style = MaterialTheme.typography.labelLarge)
+                    Text("Discovery da cache — aggiornata alle $cacheTime.", style = MaterialTheme.typography.labelLarge)
                 } else {
                     Text("Quota SerpApi live prima della Discovery: ${result.searchesLeftBeforeSearch} rimaste")
                     Text("Richieste Travel Explore di questo run: ${result.exploreRequests}")
+                }
+                if (result.verificationFromCache) {
+                    Text("Anche l'esito della verifica proviene dalla cache locale.", style = MaterialTheme.typography.labelLarge)
                 }
                 Text(
                     "Una lista vuota/anomala non viene interpretata automaticamente come assenza di voli: controlla Diagnostica per la classificazione precisa.",
@@ -637,6 +663,28 @@ private fun AnywhereWeekendResultsCard(
             }
         }
         result.candidates.forEach { AnywhereWeekendCandidateCard(it) }
+    }
+}
+
+@Composable
+private fun GeographicVerificationMessageCard(
+    attemptedIata: String?,
+    message: String,
+    fromCache: Boolean
+) {
+    Card(modifier = Modifier.fillMaxWidth()) {
+        Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text("Verifica non completata", style = MaterialTheme.typography.titleMedium)
+            attemptedIata?.let { Text("Candidato verificato: $it") }
+            if (fromCache) {
+                Text("Esito verifica riutilizzato dalla cache locale — 0 nuove query di verifica.", style = MaterialTheme.typography.labelLarge)
+            }
+            Text(message)
+            Text(
+                "La Discovery Explore resta disponibile come indicativa. VolaFlex non passa automaticamente al candidato successivo.",
+                style = MaterialTheme.typography.bodySmall
+            )
+        }
     }
 }
 
