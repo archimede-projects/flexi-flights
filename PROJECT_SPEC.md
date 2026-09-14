@@ -50,6 +50,8 @@ Kotlin/Compose; AGP 9.3.1; Kotlin 2.4.20; Gradle 9.5; Compose BOM 2026.06.00; Na
 # 9. Firma/Release
 `dev-latest` con APK `VolaFlex-dev.apk`. Firma canonica SHA-256 `a1f432f512e3d1867ee4b4535fb06a83fae5413ee700113b34e8b926a2767df3`, signer `CN=VolaFlex, OU=Personal, O=archimede-projects`, RSA4096.
 
+**v3.5 CI:** run **#29 SUCCESS**, build **`0.1.0-dev.29`**, commit `2b34d73d80b7bb0e385efdb8265ec124a7f91edc`, `BUILD SUCCESSFUL in 2m 5s`, 49 task. Firma v2/v3 valida, 1 signer, fingerprint canonico invariato. APK SHA-256 `0ae786a35bf48acf38c6f5cdcadd0267bd77ea7ee5cdca2505b54bc153855273`, asset size 9,933,187 byte. `dev-latest` verificato sul commit/run corretti.
+
 # 10. Stato e test reali
 Fase 0 CHIUSA. v1 CHIUSA. v2 COMPLETAMENTE CHIUSA.
 
@@ -60,11 +62,11 @@ v3.3 CHIUSA: Serp multi-list FCO→VLC 40 EUR; Calendar multi-list FCO→VLC 45 
 ## v3.4 — CHIUSA E VALIDATA
 UI Aeroporto/Ovunque PASS; anti-typo PASS; `FCO+CIA→Ovunque`, dicembre 2026: 1 Travel Explore, `SUCCESS`; candidati reali Bari 34 EUR, Alicante 42 EUR, Varsavia ecc. con città/paese/aeroporto/date/prezzo; nessuna Google Flights. Replay `CIA+FCO`: cache hit, 0 query, quota invariata (105 osservata).
 
-## v3.5 — IMPLEMENTATA, CI DA VALIDARE
-Solo Weekend/Discovery Country. UI `Aeroporto | Ovunque | Paese`; 1–3 origini; CountryAreaCatalog 33 paesi; `arrival_area_id` KGMID e nessun `arrival_id`; stesso parser raw di Anywhere; risultati città/paese/aeroporto/date/prezzo; cache `COUNTRY:ISO2`; nessuna Google Flights/SearchAPI; schema Room invariato.
+## v3.5 — IMPLEMENTATA + CI VERDE, TEST TELEFONO PENDENTE
+Solo Weekend/Discovery Country. UI `Aeroporto | Ovunque | Paese`; 1–3 origini; CountryAreaCatalog 33 paesi; `arrival_area_id` KGMID e nessun `arrival_id`; stesso parser raw di Anywhere; risultati città/paese/aeroporto/date/prezzo; cache `COUNTRY:ISO2`; nessuna Google Flights/SearchAPI; schema Room invariato. Build `0.1.0-dev.29` pronta al test.
 
 # 11. Rischi
 Provider mutevoli; quota condivisa; AirportDirectory/catalogo KGMID non universali; Explore ha avuto regressioni; empty response classificata prudenzialmente; combinazioni estreme sempre protette da quota/cache.
 
 # 12. Prossimo step
-Chiudere CI v3.5, verificare firma/Release. Test consigliato: Weekend → Paese → **Francia**, `FCO+CIA`, un solo mese nuovo (gennaio 2027 finché disponibile). Atteso 1 Account API gratuita + 1 Travel Explore, nessun Google Flights/SearchAPI; candidati limitati alla Francia; Diagnostica `TRAVEL_EXPLORE SUCCESS` con `Country FR`; replay `CIA+FCO` → cache hit 0. Se anomalia, non ripetere alla cieca: copiare Diagnostica. Non passare a v3.6 prima del PASS v3.5.
+Installare `0.1.0-dev.29`. Weekend → Paese → **Francia**, `FCO+CIA`, un solo mese nuovo (gennaio 2027 finché disponibile). Atteso 1 Account API gratuita + 1 Travel Explore, nessun Google Flights/SearchAPI; candidati limitati alla Francia; Diagnostica `TRAVEL_EXPLORE SUCCESS` con `Country FR`; replay `CIA+FCO` → cache hit 0. Se anomalia, non ripetere alla cieca: copiare Diagnostica. Non passare a v3.6 prima del PASS v3.5.
