@@ -1,5 +1,6 @@
 package com.archimedeprojects.volaflex.data
 
+import com.archimedeprojects.volaflex.data.local.AirportDirectory
 import com.archimedeprojects.volaflex.data.local.CountryArea
 import com.archimedeprojects.volaflex.data.local.WeekendSearchCacheDao
 import com.archimedeprojects.volaflex.data.local.WeekendSearchCacheEntity
@@ -13,6 +14,7 @@ import kotlinx.serialization.json.Json
 
 private const val COUNTRY_WEEKEND_CACHE_TTL_MILLIS = 4L * 60L * 60L * 1000L
 private const val COUNTRY_WEEKEND_QUOTA_RESERVE = 5
+private val COUNTRY_IATA_PATTERN = Regex("^[A-Z]{3}$")
 
 @Serializable
 data class CountryWeekendCandidate(
@@ -34,7 +36,11 @@ data class CountryWeekendSearchResult(
     val searchesLeftBeforeSearch: Int,
     val exploreRequests: Int,
     val fromCache: Boolean = false,
-    val cachedAtEpochMillis: Long? = null
+    val cachedAtEpochMillis: Long? = null,
+    val verifiedWeekend: VerifiedWeekendResult? = null,
+    val verificationFromCache: Boolean = false,
+    val verificationAttemptedIata: String? = null,
+    val verificationMessage: String? = null
 )
 
 sealed interface CountryWeekendSearchOutcome {
@@ -55,6 +61,7 @@ class CountryWeekendSearchRepository(
         ignoreUnknownKeys = true
         encodeDefaults = true
     }
+    private val verificationEngine = WeekendVerificationEngine(service, cacheDao, diagnostics)
 
     suspend fun search(
         apiKey: String,
@@ -103,6 +110,15 @@ class CountryWeekendSearchRepository(
                         outcome = "HIT",
                         message = "Weekend Country origins=$departure country=${country.iso2} period=$periodKey"
                     )
+                    val verification = verifyBestEligibleCandidate(
+                        apiKey = apiKey,
+                        departureId = departure,
+                        country = country,
+                        countryMarker = countryMarker,
+                        periodKey = periodKey,
+                        candidates = cachedCandidates,
+                        forceRefresh = false
+                    )
                     return CountryWeekendSearchOutcome.Success(
                         CountryWeekendSearchResult(
                             selectedCountry = country,
@@ -110,7 +126,11 @@ class CountryWeekendSearchRepository(
                             searchesLeftBeforeSearch = cached.searchesLeftBeforeSearch,
                             exploreRequests = 0,
                             fromCache = true,
-                            cachedAtEpochMillis = cached.cachedAtEpochMillis
+                            cachedAtEpochMillis = cached.cachedAtEpochMillis,
+                            verifiedWeekend = verification.verifiedWeekend,
+                            verificationFromCache = verification.fromCache,
+                            verificationAttemptedIata = verification.attemptedIata,
+                            verificationMessage = verification.message
                         )
                     )
                 }
@@ -196,15 +216,116 @@ class CountryWeekendSearchRepository(
             cacheDao.deleteOlderThan(minimumFreshTimestamp)
         }
 
+        val verification = verifyBestEligibleCandidate(
+            apiKey = apiKey,
+            departureId = departure,
+            country = country,
+            countryMarker = countryMarker,
+            periodKey = periodKey,
+            candidates = sortedCandidates,
+            forceRefresh = forceRefresh
+        )
+
         return CountryWeekendSearchOutcome.Success(
             CountryWeekendSearchResult(
                 selectedCountry = country,
                 candidates = sortedCandidates,
                 searchesLeftBeforeSearch = searchesLeft,
-                exploreRequests = exploreRequests
+                exploreRequests = exploreRequests,
+                verifiedWeekend = verification.verifiedWeekend,
+                verificationFromCache = verification.fromCache,
+                verificationAttemptedIata = verification.attemptedIata,
+                verificationMessage = verification.message
             )
         )
     }
+
+    private suspend fun verifyBestEligibleCandidate(
+        apiKey: String,
+        departureId: String,
+        country: CountryArea,
+        countryMarker: String,
+        periodKey: String,
+        candidates: List<CountryWeekendCandidate>,
+        forceRefresh: Boolean
+    ): VerificationAttachment {
+        val targetCountry = country.iso2.uppercase(Locale.ROOT)
+        val selectedPair = candidates
+            .asSequence()
+            .mapNotNull { candidate ->
+                val iata = candidate.airportIata.trim().uppercase(Locale.ROOT)
+                if (!COUNTRY_IATA_PATTERN.matches(iata)) return@mapNotNull null
+
+                val localAirport = AirportDirectory.find(iata)
+                if (localAirport == null) {
+                    diagnostics.log(
+                        requestType = "WEEKEND_VERIFY",
+                        outcome = "CANDIDATE_SKIPPED",
+                        message = "$countryMarker origins=$departureId period=$periodKey: $iata non presente in AirportDirectory"
+                    )
+                    return@mapNotNull null
+                }
+                if (!localAirport.countryCode.equals(targetCountry, ignoreCase = true)) {
+                    diagnostics.log(
+                        requestType = "WEEKEND_VERIFY",
+                        outcome = "CANDIDATE_SKIPPED",
+                        message = "$countryMarker origins=$departureId period=$periodKey: $iata=${localAirport.countryCode}, atteso $targetCountry"
+                    )
+                    return@mapNotNull null
+                }
+
+                val seed = candidate.toVerificationSeed()
+                if (!verificationEngine.hasValidPattern(seed)) return@mapNotNull null
+                candidate to seed
+            }
+            .firstOrNull()
+
+        if (selectedPair == null) {
+            val message = "Discovery disponibile, ma nessun candidato ${country.name} è verificabile in sicurezza: serve un IATA presente in AirportDirectory, appartenente a ${country.iso2}, con date weekend valide."
+            diagnostics.log(
+                requestType = "WEEKEND_VERIFY",
+                outcome = "NO_OPPORTUNITIES",
+                message = "$countryMarker origins=$departureId period=$periodKey: $message"
+            )
+            return VerificationAttachment(message = message)
+        }
+
+        val (selected, seed) = selectedPair
+        diagnostics.log(
+            requestType = "WEEKEND_VERIFY",
+            outcome = "CANDIDATE_SELECTED",
+            message = "$countryMarker origins=$departureId period=$periodKey: candidato unico ${selected.airportIata} ${selected.price} ${selected.currency}"
+        )
+
+        return when (
+            val verification = verificationEngine.verify(
+                apiKey = apiKey,
+                departureId = departureId,
+                destinationScope = countryMarker,
+                periodKey = periodKey,
+                seed = seed,
+                forceRefresh = forceRefresh
+            )
+        ) {
+            is WeekendVerificationOutcome.Success -> VerificationAttachment(
+                verifiedWeekend = verification.result,
+                fromCache = verification.fromCache,
+                attemptedIata = selected.airportIata
+            )
+            is WeekendVerificationOutcome.Unavailable -> VerificationAttachment(
+                fromCache = verification.fromCache,
+                attemptedIata = selected.airportIata,
+                message = verification.message
+            )
+        }
+    }
+
+    private fun CountryWeekendCandidate.toVerificationSeed() = WeekendVerificationSeed(
+        airportIata = airportIata,
+        outboundDate = outboundDate,
+        returnDate = returnDate,
+        monthKey = monthKey
+    )
 
     private suspend fun searchSingleMonth(
         apiKey: String,
@@ -378,6 +499,13 @@ class CountryWeekendSearchRepository(
             "unauthorized" in normalized ||
             "authentication" in normalized
     }
+
+    private data class VerificationAttachment(
+        val verifiedWeekend: VerifiedWeekendResult? = null,
+        val fromCache: Boolean = false,
+        val attemptedIata: String? = null,
+        val message: String? = null
+    )
 
     private sealed interface SingleMonthOutcome {
         data class Success(val candidates: List<CountryWeekendCandidate>) : SingleMonthOutcome
