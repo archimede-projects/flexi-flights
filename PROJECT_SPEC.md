@@ -62,11 +62,11 @@ v3.3 CHIUSA: Serp multi-list FCO→VLC 40 EUR; Calendar multi-list FCO→VLC 45 
 ## v3.4 — CHIUSA E VALIDATA
 UI Aeroporto/Ovunque PASS; anti-typo PASS; `FCO+CIA→Ovunque`, dicembre 2026: 1 Travel Explore, `SUCCESS`; candidati reali Bari 34 EUR, Alicante 42 EUR, Varsavia ecc. con città/paese/aeroporto/date/prezzo; nessuna Google Flights. Replay `CIA+FCO`: cache hit, 0 query, quota invariata (105 osservata).
 
-## v3.5 — IMPLEMENTATA + CI VERDE, TEST TELEFONO PENDENTE
-Solo Weekend/Discovery Country. UI `Aeroporto | Ovunque | Paese`; 1–3 origini; CountryAreaCatalog 33 paesi; `arrival_area_id` KGMID e nessun `arrival_id`; stesso parser raw di Anywhere; risultati città/paese/aeroporto/date/prezzo; cache `COUNTRY:ISO2`; nessuna Google Flights/SearchAPI; schema Room invariato. Build `0.1.0-dev.29` pronta al test.
+## v3.5 — CHIUSA E VALIDATA SUL TELEFONO REALE
+Weekend/Discovery Country validata end-to-end su build `0.1.0-dev.29`. Test reale `FCO+CIA → Francia`, gennaio 2027: candidato **Lourdes**, Paese **Francia**, aeroporto **LDE**, **72 EUR**, periodo Explore **08/01→11/01/2027**. Controllo geografico anti-KGMID-sbagliato superato: il candidato appartiene realmente alla Francia. Diagnostica: `SERPAPI_ACCOUNT` + **1 solo `TRAVEL_EXPLORE`**, nessun Google Flights/Weekend Verify/SearchAPI Calendar. Replay con origini invertite `CIA+FCO`: `Risultato da cache`, **0 nuove query**. Consumo reale: **1 sola query SerpApi**, come previsto. UI `Aeroporto | Ovunque | Paese`, 1–3 origini, CountryAreaCatalog 33 paesi, cache `COUNTRY:ISO2`, schema Room invariato: PASS.
 
 # 11. Rischi
 Provider mutevoli; quota condivisa; AirportDirectory/catalogo KGMID non universali; Explore ha avuto regressioni; empty response classificata prudenzialmente; combinazioni estreme sempre protette da quota/cache.
 
 # 12. Prossimo step
-Installare `0.1.0-dev.29`. Weekend → Paese → **Francia**, `FCO+CIA`, un solo mese nuovo (gennaio 2027 finché disponibile). Atteso 1 Account API gratuita + 1 Travel Explore, nessun Google Flights/SearchAPI; candidati limitati alla Francia; Diagnostica `TRAVEL_EXPLORE SUCCESS` con `Country FR`; replay `CIA+FCO` → cache hit 0. Se anomalia, non ripetere alla cieca: copiare Diagnostica. Non passare a v3.6 prima del PASS v3.5.
+**BLOCCO prima di v3.6:** correggere regressione UI nel selettore principale della schermata Ricerca. In modalità Weekend oggi sparisce `N notti`; tutte e tre le modalità `Date fisse | Weekend | N notti` devono restare sempre visibili e selezionabili, senza compromettere il selettore secondario Weekend `Aeroporto | Ovunque | Paese`. Fix esclusivamente layout/navigazione UI: nessuna modifica a repository/provider/rete/cache/query. Verificare CI/Release e testare sul telefono tutte le combinazioni prima di iniziare v3.6.
