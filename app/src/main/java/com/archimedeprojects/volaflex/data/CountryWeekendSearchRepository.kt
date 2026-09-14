@@ -250,35 +250,35 @@ class CountryWeekendSearchRepository(
         forceRefresh: Boolean
     ): VerificationAttachment {
         val targetCountry = country.iso2.uppercase(Locale.ROOT)
-        val selectedPair = candidates
-            .asSequence()
-            .mapNotNull { candidate ->
-                val iata = candidate.airportIata.trim().uppercase(Locale.ROOT)
-                if (!COUNTRY_IATA_PATTERN.matches(iata)) return@mapNotNull null
+        var selectedPair: Pair<CountryWeekendCandidate, WeekendVerificationSeed>? = null
 
-                val localAirport = AirportDirectory.find(iata)
-                if (localAirport == null) {
-                    diagnostics.log(
-                        requestType = "WEEKEND_VERIFY",
-                        outcome = "CANDIDATE_SKIPPED",
-                        message = "$countryMarker origins=$departureId period=$periodKey: $iata non presente in AirportDirectory"
-                    )
-                    return@mapNotNull null
-                }
-                if (!localAirport.countryCode.equals(targetCountry, ignoreCase = true)) {
-                    diagnostics.log(
-                        requestType = "WEEKEND_VERIFY",
-                        outcome = "CANDIDATE_SKIPPED",
-                        message = "$countryMarker origins=$departureId period=$periodKey: $iata=${localAirport.countryCode}, atteso $targetCountry"
-                    )
-                    return@mapNotNull null
-                }
+        for (candidate in candidates) {
+            val iata = candidate.airportIata.trim().uppercase(Locale.ROOT)
+            if (!COUNTRY_IATA_PATTERN.matches(iata)) continue
 
-                val seed = candidate.toVerificationSeed()
-                if (!verificationEngine.hasValidPattern(seed)) return@mapNotNull null
-                candidate to seed
+            val localAirport = AirportDirectory.find(iata)
+            if (localAirport == null) {
+                diagnostics.log(
+                    requestType = "WEEKEND_VERIFY",
+                    outcome = "CANDIDATE_SKIPPED",
+                    message = "$countryMarker origins=$departureId period=$periodKey: $iata non presente in AirportDirectory"
+                )
+                continue
             }
-            .firstOrNull()
+            if (!localAirport.countryCode.equals(targetCountry, ignoreCase = true)) {
+                diagnostics.log(
+                    requestType = "WEEKEND_VERIFY",
+                    outcome = "CANDIDATE_SKIPPED",
+                    message = "$countryMarker origins=$departureId period=$periodKey: $iata=${localAirport.countryCode}, atteso $targetCountry"
+                )
+                continue
+            }
+
+            val seed = candidate.toVerificationSeed()
+            if (!verificationEngine.hasValidPattern(seed)) continue
+            selectedPair = candidate to seed
+            break
+        }
 
         if (selectedPair == null) {
             val message = "Discovery disponibile, ma nessun candidato ${country.name} è verificabile in sicurezza: serve un IATA presente in AirportDirectory, appartenente a ${country.iso2}, con date weekend valide."
