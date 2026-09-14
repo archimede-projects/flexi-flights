@@ -50,7 +50,9 @@ Kotlin/Compose; AGP 9.3.1; Kotlin 2.4.20; Gradle 9.5; Compose BOM 2026.06.00; Na
 # 9. Firma/Release
 `dev-latest` con APK `VolaFlex-dev.apk`. Firma canonica SHA-256 `a1f432f512e3d1867ee4b4535fb06a83fae5413ee700113b34e8b926a2767df3`, signer `CN=VolaFlex, OU=Personal, O=archimede-projects`, RSA4096.
 
-**v3.5 CI:** run **#29 SUCCESS**, build **`0.1.0-dev.29`**, commit `2b34d73d80b7bb0e385efdb8265ec124a7f91edc`, `BUILD SUCCESSFUL in 2m 5s`, 49 task. Firma v2/v3 valida, 1 signer, fingerprint canonico invariato. APK SHA-256 `0ae786a35bf48acf38c6f5cdcadd0267bd77ea7ee5cdca2505b54bc153855273`, asset size 9,933,187 byte. `dev-latest` verificato sul commit/run corretti.
+**v3.5 CI:** run **#29 SUCCESS**, build **`0.1.0-dev.29`**, commit `2b34d73d80b7bb0e385efdb8265ec124a7f91edc`, `BUILD SUCCESSFUL in 2m 5s`, 49 task. Firma v2/v3 valida, 1 signer, fingerprint canonico invariato. APK SHA-256 `0ae786a35bf48acf38c6f5cdcadd0267bd77ea7ee5cdca2505b54bc153855273`, asset size 9,933,187 byte.
+
+**Fix UI selettore principale:** run **#31 SUCCESS**, build **`0.1.0-dev.31`**, commit applicativo `4dddf1195311aa8546eeb26c11e8431f1fd0f30d`; `BUILD SUCCESSFUL in 2m 15s`, 49 task. Firma v2/v3 valida, 1 signer, fingerprint canonico invariato. APK SHA-256 `8fb7cb81ed0575e1addd5cdd0b2aebd447fc0e1b96d376efc8bef03f10044d65`, asset size 9,933,187 byte. Release `dev-latest` aggiornata sul commit/run corretti.
 
 # 10. Stato e test reali
 Fase 0 CHIUSA. v1 CHIUSA. v2 COMPLETAMENTE CHIUSA.
@@ -65,8 +67,11 @@ UI Aeroporto/Ovunque PASS; anti-typo PASS; `FCO+CIA→Ovunque`, dicembre 2026: 1
 ## v3.5 — CHIUSA E VALIDATA SUL TELEFONO REALE
 Weekend/Discovery Country validata end-to-end su build `0.1.0-dev.29`. Test reale `FCO+CIA → Francia`, gennaio 2027: candidato **Lourdes**, Paese **Francia**, aeroporto **LDE**, **72 EUR**, periodo Explore **08/01→11/01/2027**. Controllo geografico anti-KGMID-sbagliato superato: il candidato appartiene realmente alla Francia. Diagnostica: `SERPAPI_ACCOUNT` + **1 solo `TRAVEL_EXPLORE`**, nessun Google Flights/Weekend Verify/SearchAPI Calendar. Replay con origini invertite `CIA+FCO`: `Risultato da cache`, **0 nuove query**. Consumo reale: **1 sola query SerpApi**, come previsto. UI `Aeroporto | Ovunque | Paese`, 1–3 origini, CountryAreaCatalog 33 paesi, cache `COUNTRY:ISO2`, schema Room invariato: PASS.
 
+## Fix regressione UI post-v3.5 — IMPLEMENTATO + CI VERDE, TEST TELEFONO PENDENTE
+Causa esatta: `WeekendSearchScreen.kt` aveva il selettore principale hard-coded con soli `Date fisse | Weekend` e non esponeva alcun callback `onOpenNights`; non era un overflow causato dal selettore secondario. Fix: aggiunto `N notti` con peso uguale e callback di navigazione cablato in `VolaFlexApp.kt`; spacing principale uniformato a 6 dp. Nel selettore secondario `Aeroporto | Ovunque | Paese` il padding orizzontale interno è ridotto a 8 dp e le label sono forzate su una sola riga (`maxLines=1`, `softWrap=false`) per evitare il wrap di `Aeroporto`. Diff applicativo limitato a `WeekendSearchScreen.kt` e `VolaFlexApp.kt`; nessun file repository/provider/rete/cache/query modificato.
+
 # 11. Rischi
 Provider mutevoli; quota condivisa; AirportDirectory/catalogo KGMID non universali; Explore ha avuto regressioni; empty response classificata prudenzialmente; combinazioni estreme sempre protette da quota/cache.
 
 # 12. Prossimo step
-**BLOCCO prima di v3.6:** correggere regressione UI nel selettore principale della schermata Ricerca. In modalità Weekend oggi sparisce `N notti`; tutte e tre le modalità `Date fisse | Weekend | N notti` devono restare sempre visibili e selezionabili, senza compromettere il selettore secondario Weekend `Aeroporto | Ovunque | Paese`. Fix esclusivamente layout/navigazione UI: nessuna modifica a repository/provider/rete/cache/query. Verificare CI/Release e testare sul telefono tutte le combinazioni prima di iniziare v3.6.
+Installare `0.1.0-dev.31` e validare sul telefono il fix UI senza eseguire ricerche di rete: verificare che `Date fisse | Weekend | N notti` restino sempre visibili e selezionabili in Date fisse, Weekend+Aeroporto, Weekend+Ovunque, Weekend+Paese e N notti; in Weekend verificare anche che `Aeroporto | Ovunque | Paese` restino leggibili e `Aeroporto` non vada a capo. **Non iniziare v3.6 fino al PASS di questo test UI.**
