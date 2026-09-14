@@ -3,6 +3,7 @@ package com.archimedeprojects.volaflex.ui
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -93,6 +94,7 @@ fun WeekendSearchScreen(
     anywhereRepository: AnywhereWeekendSearchRepository,
     countryRepository: CountryWeekendSearchRepository,
     onOpenFixedDates: () -> Unit,
+    onOpenNights: () -> Unit,
     onOpenSettings: () -> Unit,
     onBackHome: () -> Unit
 ) {
@@ -203,13 +205,16 @@ fun WeekendSearchScreen(
 
         Row(
             modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(10.dp)
+            horizontalArrangement = Arrangement.spacedBy(6.dp)
         ) {
             OutlinedButton(onClick = onOpenFixedDates, modifier = Modifier.weight(1f)) {
                 Text("Date fisse")
             }
             Button(onClick = {}, modifier = Modifier.weight(1f)) {
                 Text("Weekend")
+            }
+            OutlinedButton(onClick = onOpenNights, modifier = Modifier.weight(1f)) {
+                Text("N notti")
             }
         }
 
@@ -519,10 +524,23 @@ private fun DestinationChoiceButton(
     modifier: Modifier,
     onClick: () -> Unit
 ) {
+    val contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp)
     if (selected) {
-        Button(onClick = onClick, modifier = modifier) { Text(label) }
+        Button(
+            onClick = onClick,
+            modifier = modifier,
+            contentPadding = contentPadding
+        ) {
+            Text(label, maxLines = 1, softWrap = false, style = MaterialTheme.typography.labelLarge)
+        }
     } else {
-        OutlinedButton(onClick = onClick, modifier = modifier) { Text(label) }
+        OutlinedButton(
+            onClick = onClick,
+            modifier = modifier,
+            contentPadding = contentPadding
+        ) {
+            Text(label, maxLines = 1, softWrap = false, style = MaterialTheme.typography.labelLarge)
+        }
     }
 }
 
