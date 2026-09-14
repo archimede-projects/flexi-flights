@@ -13,6 +13,7 @@ import kotlinx.serialization.json.Json
 private const val ANYWHERE_WEEKEND_CACHE_TTL_MILLIS = 4L * 60L * 60L * 1000L
 private const val ANYWHERE_WEEKEND_QUOTA_RESERVE = 5
 private const val ANYWHERE_CACHE_MARKER = "ANYWHERE"
+private val IATA_PATTERN = Regex("^[A-Z]{3}$")
 
 @Serializable
 data class AnywhereWeekendCandidate(
@@ -33,7 +34,11 @@ data class AnywhereWeekendSearchResult(
     val searchesLeftBeforeSearch: Int,
     val exploreRequests: Int,
     val fromCache: Boolean = false,
-    val cachedAtEpochMillis: Long? = null
+    val cachedAtEpochMillis: Long? = null,
+    val verifiedWeekend: VerifiedWeekendResult? = null,
+    val verificationFromCache: Boolean = false,
+    val verificationAttemptedIata: String? = null,
+    val verificationMessage: String? = null
 )
 
 sealed interface AnywhereWeekendSearchOutcome {
@@ -54,6 +59,7 @@ class AnywhereWeekendSearchRepository(
         ignoreUnknownKeys = true
         encodeDefaults = true
     }
+    private val verificationEngine = WeekendVerificationEngine(service, cacheDao, diagnostics)
 
     suspend fun search(
         apiKey: String,
@@ -86,13 +92,24 @@ class AnywhereWeekendSearchRepository(
                 }.getOrNull()
                 if (!cachedCandidates.isNullOrEmpty()) {
                     diagnostics.log("CACHE", "HIT", message = "Weekend Anywhere origins=$departure period=$periodKey")
+                    val verification = verifyBestEligibleCandidate(
+                        apiKey = apiKey,
+                        departureId = departure,
+                        periodKey = periodKey,
+                        candidates = cachedCandidates,
+                        forceRefresh = false
+                    )
                     return AnywhereWeekendSearchOutcome.Success(
                         AnywhereWeekendSearchResult(
                             candidates = cachedCandidates,
                             searchesLeftBeforeSearch = cached.searchesLeftBeforeSearch,
                             exploreRequests = 0,
                             fromCache = true,
-                            cachedAtEpochMillis = cached.cachedAtEpochMillis
+                            cachedAtEpochMillis = cached.cachedAtEpochMillis,
+                            verifiedWeekend = verification.verifiedWeekend,
+                            verificationFromCache = verification.fromCache,
+                            verificationAttemptedIata = verification.attemptedIata,
+                            verificationMessage = verification.message
                         )
                     )
                 }
@@ -161,10 +178,86 @@ class AnywhereWeekendSearchRepository(
             cacheDao.deleteOlderThan(minimumFreshTimestamp)
         }
 
+        val verification = verifyBestEligibleCandidate(
+            apiKey = apiKey,
+            departureId = departure,
+            periodKey = periodKey,
+            candidates = sortedCandidates,
+            forceRefresh = forceRefresh
+        )
+
         return AnywhereWeekendSearchOutcome.Success(
-            AnywhereWeekendSearchResult(sortedCandidates, searchesLeft, exploreRequests)
+            AnywhereWeekendSearchResult(
+                candidates = sortedCandidates,
+                searchesLeftBeforeSearch = searchesLeft,
+                exploreRequests = exploreRequests,
+                verifiedWeekend = verification.verifiedWeekend,
+                verificationFromCache = verification.fromCache,
+                verificationAttemptedIata = verification.attemptedIata,
+                verificationMessage = verification.message
+            )
         )
     }
+
+    private suspend fun verifyBestEligibleCandidate(
+        apiKey: String,
+        departureId: String,
+        periodKey: String,
+        candidates: List<AnywhereWeekendCandidate>,
+        forceRefresh: Boolean
+    ): VerificationAttachment {
+        val candidate = candidates
+            .asSequence()
+            .filter { IATA_PATTERN.matches(it.airportIata.trim().uppercase(Locale.ROOT)) }
+            .map { it to it.toVerificationSeed() }
+            .firstOrNull { (_, seed) -> verificationEngine.hasValidPattern(seed) }
+
+        if (candidate == null) {
+            val message = "Discovery disponibile, ma nessun candidato Ovunque ha IATA e date sufficienti per una verifica weekend sicura."
+            diagnostics.log(
+                requestType = "WEEKEND_VERIFY",
+                outcome = "NO_OPPORTUNITIES",
+                message = "ANYWHERE origins=$departureId period=$periodKey: $message"
+            )
+            return VerificationAttachment(message = message)
+        }
+
+        val (selected, seed) = candidate
+        diagnostics.log(
+            requestType = "WEEKEND_VERIFY",
+            outcome = "CANDIDATE_SELECTED",
+            message = "ANYWHERE origins=$departureId period=$periodKey: candidato unico ${selected.airportIata} ${selected.price} ${selected.currency}"
+        )
+
+        return when (
+            val verification = verificationEngine.verify(
+                apiKey = apiKey,
+                departureId = departureId,
+                destinationScope = ANYWHERE_CACHE_MARKER,
+                periodKey = periodKey,
+                seed = seed,
+                forceRefresh = forceRefresh
+            )
+        ) {
+            is WeekendVerificationOutcome.Success -> VerificationAttachment(
+                verifiedWeekend = verification.result,
+                fromCache = verification.fromCache,
+                attemptedIata = selected.airportIata
+            )
+            is WeekendVerificationOutcome.Unavailable -> VerificationAttachment(
+                fromCache = verification.fromCache,
+                attemptedIata = selected.airportIata,
+                message = verification.message
+            )
+        }
+    }
+
+    private fun AnywhereWeekendCandidate.toVerificationSeed() = WeekendVerificationSeed(
+        airportIata = airportIata,
+        outboundDate = outboundDate,
+        returnDate = returnDate,
+        monthKey = monthKey
+    )
 
     private suspend fun searchSingleMonth(
         apiKey: String,
@@ -294,6 +387,13 @@ class AnywhereWeekendSearchRepository(
         val normalized = message.lowercase()
         return "api key" in normalized || "api_key" in normalized || "unauthorized" in normalized || "authentication" in normalized
     }
+
+    private data class VerificationAttachment(
+        val verifiedWeekend: VerifiedWeekendResult? = null,
+        val fromCache: Boolean = false,
+        val attemptedIata: String? = null,
+        val message: String? = null
+    )
 
     private sealed interface SingleMonthOutcome {
         data class Success(val candidates: List<AnywhereWeekendCandidate>) : SingleMonthOutcome
