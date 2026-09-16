@@ -1,6 +1,8 @@
 # SESSION_HANDOFF
 
-**Fase attuale:** v3 — Geografia avanzata. **Fase 0, v1 Fondamenta, l'intera v2 Date flessibili, v3.1, v3.2, v3.3, v3.4 e v3.5 sono CHIUSE e validate sul telefono reale. Il blocker UI post-v3.5 è CHIUSO E VALIDATO. v3.6 verifica geografica Weekend è IMPLEMENTATA, CI verde e Release pubblicata; test telefono Ovunque/Paese pendenti.**
+**Ultimo aggiornamento:** 2026-09-16
+
+**Fase attuale:** v3 — Geografia avanzata. **Fase 0, v1 Fondamenta, l'intera v2 Date flessibili, v3.1, v3.2, v3.3, v3.4, v3.5 e v3.6 sono CHIUSE e validate sul telefono/device reale. Il blocker UI post-v3.5 è CHIUSO E VALIDATO. v3.7 è da definire.**
 
 **v3 architettura:** `v3.1 → v3.2 → v3.3 → v3.4 → v3.5 → v3.6 → v3.7`. Origine `Airports(max 3)`; destinazione esclusiva fra `Airports(max 3)`, `Anywhere`, `Country`; no destinazioni composite. Pattern `DISCOVERY → VERIFICA → DETTAGLIO`, cache canonicalizzate, Account API live, niente brute force cartesiano.
 
@@ -26,8 +28,8 @@
 
 **CI v3.6:** run #36 fallita in compile per `NON_LOCAL_SUSPENSION_POINT`: `diagnostics.log` suspend dentro `Sequence.mapNotNull` della guard Country. Fix con ciclo `for` suspend-safe, comportamento invariato. Run autorevole **#37 = SUCCESS**, build **`0.1.0-dev.37`**, commit applicativo/finale di build `86b3c5aac180c335c7513485896a876d198e4b0e`; `BUILD SUCCESSFUL in 2m 19s`, 49 task. Firma v2/v3 valida, 1 signer, fingerprint canonico `a1f432f512e3d1867ee4b4535fb06a83fae5413ee700113b34e8b926a2767df3`. APK SHA-256 `4471b0adf32ee74cba53a864c7d21f6a9f0886eba433e9a67f63f12c08121634`, size 9,949,571 byte. Release `dev-latest` verificata su version/commit/run corretti.
 
-**Test telefono richiesti:** installare `0.1.0-dev.37`. 1) Ovunque, singolo mese nuovo: atteso 1 Explore + max 2 `WEEKEND_VERIFY`, card verificata oppure messaggio sul solo candidato tentato; nessun fallback. Replay con origini invertite: 0 query se entrambe cache fresche. 2) Paese, singolo mese nuovo: stesso budget max 3, verificare `CANDIDATE_SELECTED`/eventuali `CANDIDATE_SKIPPED`, IATA appartenente localmente al paese e assenza fallback. Consumo massimo round iniziale due test = **6 query SerpApi**; replay entrambi = 0.
+**v3.6 CHIUSA E VALIDATA SU DEVICE REALE — 2026-09-16:** build `0.1.0-dev.37`. Tre verifiche reali PASS: 1) **Weekend → Ovunque:** confermato il flusso Discovery Explore → verifica di un singolo candidato e, in caso di verifica fallita, **nessun fallback automatico** verso il candidato successivo; 2) **Weekend → Paese:** verifica Google Flights riuscita e replay confermato a **0 nuove query**; 3) **canonicalizzazione cache origini:** test incrociato `MXP/BGY` vs `BGY/MXP` conferma cache hit con ordine origini invertito e **0 nuove query**. Questi test chiudono i blocker funzionali previsti per v3.6.
 
-**Stato:** v3.6 NON ancora chiusa: implementazione/CI/Release PASS, validazione telefono Ovunque e Paese pendente. **Non implementato:** v3.7 integrazione/hardening.
+**Stato:** v3.6 **CHIUSA E VALIDATA su device reale**. **Non implementato:** v3.7, ancora da definire; la scelta dovrà restare coerente con `DISCOVERY → VERIFICA → DETTAGLIO` e con la scarsità di quota SerpApi.
 
 **Regola:** dopo ogni decisione/modifica/step completato aggiornare `PROJECT_SPEC.md` e `SESSION_HANDOFF.md`. Nuova chat: leggere entrambi prima di procedere.
