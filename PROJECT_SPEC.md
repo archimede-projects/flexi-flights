@@ -4,7 +4,7 @@
 **Nome app:** VolaFlex  
 **Application ID / namespace:** `com.archimedeprojects.volaflex`  
 **Ruolo:** fonte di verità persistente del progetto  
-**Ultimo aggiornamento:** 2026-09-14
+**Ultimo aggiornamento:** 2026-09-16
 
 ## Regola di manutenzione
 Aggiornare questo file dopo ogni requisito/decisione/modifica/step completato. `SESSION_HANDOFF.md` è il riepilogo operativo sintetico.
@@ -77,11 +77,13 @@ Weekend/Discovery Country validata end-to-end su build `0.1.0-dev.29`. Test real
 ## Fix regressione UI post-v3.5 — CHIUSO E VALIDATO SUL TELEFONO REALE
 Validazione reale build `0.1.0-dev.31`: **Test A Date fisse PASS**; **Test B Weekend/Aeroporto PASS**; **Test E parziale PASS**. Weekend/Ovunque e Weekend/Paese non riverificati con screenshot dedicati; rischio residuo accettato basso. Blocker UI chiuso.
 
-## v3.6 — IMPLEMENTATA + CI VERDE + RELEASE PUBBLICATA, TEST TELEFONO PENDENTI
-Aggiunto `WeekendVerificationEngine` condiviso. Ovunque/Paese: dopo Discovery i candidati sono ordinati per prezzo e viene verificato **un solo candidato più economico eleggibile**; IATA valido + date/pattern validi. Paese aggiunge guard locale obbligatoria `AirportDirectory.find(IATA)?.countryCode == selectedCountry.iso2`; candidati sconosciuti o di paese diverso vengono saltati senza query. Google Flights usa `departure_id=<origini canonicalizzate>` e `arrival_id=<IATA candidato>`, massimo due pattern. Nessun fallback automatico al secondo candidato se la verifica scelta dà `NO_MATCH` o errore: Discovery resta visibile con candidato tentato e messaggio. UI mostra `Weekend verificato ✓` sopra Discovery quando disponibile. Il percorso aeroporto specifico usa ora lo stesso engine. Costo un mese/cache miss: 1 Explore + max 2 Google Flights = max 3 query SerpApi di ricerca; Account API gratuita. Build da testare: `0.1.0-dev.37`.
+## v3.6 — CHIUSA E VALIDATA SU DEVICE REALE — 2026-09-16
+Build validata: `0.1.0-dev.37`. Implementazione: `WeekendVerificationEngine` condiviso; Ovunque/Paese verificano un solo candidato più economico eleggibile; Country applica guard geografica locale; Google Flights usa origini canonicalizzate + singolo `arrival_id`; massimo due pattern; nessun fallback automatico dopo il candidato scelto; cache Discovery/Verifica indipendenti e canonicalizzate.
+
+Validazione reale PASS su tre aspetti: 1) **Weekend → Ovunque:** confermato `Discovery Explore → verifica singolo candidato`; su verifica non riuscita la Discovery resta disponibile e non viene verificato automaticamente un secondo candidato; 2) **Weekend → Paese:** verifica riuscita end-to-end e replay confermato a **0 nuove query**; 3) **canonicalizzazione ordine origini:** test `MXP/BGY` vs `BGY/MXP` conferma cache hit incrociato con ordine invertito e **0 nuove query**. v3.6 è quindi chiusa sia funzionalmente sia lato cache/quota.
 
 # 11. Rischi
 Provider mutevoli; quota condivisa; AirportDirectory/catalogo KGMID non universali; Explore ha avuto regressioni; empty response classificata prudenzialmente; combinazioni estreme sempre protette da quota/cache. Per Country v3.6, un candidato Explore non presente in AirportDirectory è intenzionalmente non eleggibile alla verifica anche se potrebbe essere geograficamente corretto: sicurezza geografica prevale sulla copertura.
 
-# 12. Prossimo step
-Installare `0.1.0-dev.37` e fare due test reali separati su un singolo mese: **Ovunque** e **Paese**, ciascuno con budget massimo **3 query SerpApi** (1 Explore + max 2 Google Flights). Verificare card `Weekend verificato ✓` oppure messaggio sul solo candidato tentato, assenza di fallback e diagnostica `WEEKEND_VERIFY`. Replay con origini invertite atteso a 0 query quando Discovery+Verifica sono entrambe fresche. Consumo massimo round iniziale dei due test: **6 query SerpApi**; replay entrambi: +0. Non chiudere v3.6 finché entrambi i percorsi non sono validati sul telefono.
+# 12. Roadmap
+`v3.1 → v3.2 → v3.3 → v3.4 → v3.5 → v3.6` sono chiuse. **v3.7 è da definire, non implementata.** La scelta deve restare coerente con `DISCOVERY → VERIFICA → DETTAGLIO`, mantenere il controllo stretto della quota SerpApi e privilegiare funzioni che possano riusare dati già verificati o introdurre filtri/integrazioni locali prima di aggiungere nuove chiamate di rete.
