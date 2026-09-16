@@ -2,7 +2,7 @@
 
 **Ultimo aggiornamento:** 2026-09-16
 
-**Fase attuale:** v3 — Geografia avanzata. **Fase 0, v1 Fondamenta, l'intera v2 Date flessibili, v3.1, v3.2, v3.3, v3.4, v3.5 e v3.6 sono CHIUSE e validate sul telefono/device reale. Il blocker UI post-v3.5 è CHIUSO E VALIDATO. v3.7 è da definire.**
+**Fase attuale:** v3 — Geografia avanzata. **Fase 0, v1 Fondamenta, l'intera v2 Date flessibili, v3.1, v3.2, v3.3, v3.4, v3.5 e v3.6 sono CHIUSE e validate sul telefono/device reale. Il blocker UI post-v3.5 è CHIUSO E VALIDATO. v3.7-B Maps Intent è IMPLEMENTATA, CI verde e Release pubblicata; test device Maps pendente. v3.7-A filtri post-verifica è il prossimo step pianificato ma NON iniziato.**
 
 **v3 architettura:** `v3.1 → v3.2 → v3.3 → v3.4 → v3.5 → v3.6 → v3.7`. Origine `Airports(max 3)`; destinazione esclusiva fra `Airports(max 3)`, `Anywhere`, `Country`; no destinazioni composite. Pattern `DISCOVERY → VERIFICA → DETTAGLIO`, cache canonicalizzate, Account API live, niente brute force cartesiano.
 
@@ -30,6 +30,10 @@
 
 **v3.6 CHIUSA E VALIDATA SU DEVICE REALE — 2026-09-16:** build `0.1.0-dev.37`. Tre verifiche reali PASS: 1) **Weekend → Ovunque:** confermato il flusso Discovery Explore → verifica di un singolo candidato e, in caso di verifica fallita, **nessun fallback automatico** verso il candidato successivo; 2) **Weekend → Paese:** verifica Google Flights riuscita e replay confermato a **0 nuove query**; 3) **canonicalizzazione cache origini:** test incrociato `MXP/BGY` vs `BGY/MXP` conferma cache hit con ordine origini invertito e **0 nuove query**. Questi test chiudono i blocker funzionali previsti per v3.6.
 
-**Stato:** v3.6 **CHIUSA E VALIDATA su device reale**. **Non implementato:** v3.7, ancora da definire; la scelta dovrà restare coerente con `DISCOVERY → VERIFICA → DETTAGLIO` e con la scarsità di quota SerpApi.
+**v3.7-B Maps Intent — IMPLEMENTATA, CI/RELEASE PASS; TEST DEVICE PENDENTE:** commit applicativo `741af21c6a675eb1ce2d2144703429c5d3337bb5`. Nuovo helper UI `MapsIntent.kt`; pulsante `Apri in Maps` sulle card `Weekend verificato ✓` (Aeroporto/Ovunque/Paese, entrambi i pattern) e `N notti verificato ✓`. Destinazione costruita da IATA + `AirportDirectory`; se l'IATA verificato non è catalogato usa `<IATA> airport`. Primo tentativo: `ACTION_VIEW` su URI `geo:0,0?q=...` con package Google Maps. Se Maps non è installata: fallback `ACTION_VIEW` a `https://www.google.com/maps/search/?api=1&query=...`. Nessuna nuova dipendenza, nessun Maps SDK/Places API, nessun Manifest change, nessuna modifica Discovery/Verifica/cache/provider: **0 nuove query e rischio quota nullo**. Nessun unit test aggiunto perché la repo non ha `app/src/test`/dipendenze test e la spec non impone test UI per questa feature.
+
+**CI v3.7-B:** run **#38 = SUCCESS**, build **`0.1.0-dev.38`**, commit `741af21c6a675eb1ce2d2144703429c5d3337bb5`; `BUILD SUCCESSFUL in 2m 2s`, 49 task. Firma v2/v3 valida, 1 signer, fingerprint canonico invariato `a1f432f512e3d1867ee4b4535fb06a83fae5413ee700113b34e8b926a2767df3`. APK SHA-256 `65ddf4e90092b7781eaeea99a681d7dc7a1b888e580eb593f9974edda8fd13c5`, size 9,965,955 byte. Release `dev-latest` verificata su version `0.1.0-dev.38`, commit e run #38.
+
+**Stato:** v3.6 **CHIUSA E VALIDATA su device reale**. v3.7-B **implementata + CI/Release PASS**, da validare sul device reale per apertura Maps/fallback. **v3.7-A filtri post-verifica (scali/compagnia/durata) è il prossimo step pianificato ma NON iniziato**; deve privilegiare il riuso dei dati già verificati senza moltiplicare le query.
 
 **Regola:** dopo ogni decisione/modifica/step completato aggiornare `PROJECT_SPEC.md` e `SESSION_HANDOFF.md`. Nuova chat: leggere entrambi prima di procedere.
