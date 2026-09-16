@@ -471,6 +471,10 @@ private fun NightsResultCard(
                 text = "Prezzo round-trip verificato: ${result.price} ${result.currency}",
                 style = MaterialTheme.typography.titleLarge
             )
+            OpenInMapsButton(
+                destinationIata = result.arrivalAirportId,
+                modifier = Modifier.fillMaxWidth()
+            )
 
             if (result.indicativePrice != null && result.indicativePrice != result.price) {
                 Text("Prezzo Discovery indicativo: ${result.indicativePrice} ${result.currency}")

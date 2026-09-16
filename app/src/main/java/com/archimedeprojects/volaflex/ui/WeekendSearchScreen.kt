@@ -551,7 +551,11 @@ private fun CountryWeekendResultsCard(
 ) {
     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
         result.verifiedWeekend?.let { verified ->
-            VerifiedWeekendCard(verified, result.verificationFromCache)
+            VerifiedWeekendCard(
+                result = verified,
+                fromCache = result.verificationFromCache,
+                destinationIata = result.verificationAttemptedIata
+            )
         }
         result.verificationMessage?.let { message ->
             GeographicVerificationMessageCard(
@@ -623,7 +627,11 @@ private fun AnywhereWeekendResultsCard(
 ) {
     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
         result.verifiedWeekend?.let { verified ->
-            VerifiedWeekendCard(verified, result.verificationFromCache)
+            VerifiedWeekendCard(
+                result = verified,
+                fromCache = result.verificationFromCache,
+                destinationIata = result.verificationAttemptedIata
+            )
         }
         result.verificationMessage?.let { message ->
             GeographicVerificationMessageCard(
@@ -708,8 +716,13 @@ private fun WeekendResultsCard(
     onForceRefresh: () -> Unit
 ) {
     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        result.verifiedWeekend?.let { verified ->
-            VerifiedWeekendCard(verified, result.verificationFromCache)
+        val verifiedCandidate = result.candidates.firstOrNull { it.verification != null }
+        verifiedCandidate?.verification?.let { verified ->
+            VerifiedWeekendCard(
+                result = verified,
+                fromCache = result.verificationFromCache,
+                destinationIata = verifiedCandidate.destinationIata
+            )
         }
         if (result.verificationMessage != null) {
             Card(modifier = Modifier.fillMaxWidth()) {
@@ -752,7 +765,8 @@ private fun WeekendResultsCard(
 @Composable
 private fun VerifiedWeekendCard(
     result: VerifiedWeekendResult,
-    fromCache: Boolean
+    fromCache: Boolean,
+    destinationIata: String?
 ) {
     Card(modifier = Modifier.fillMaxWidth()) {
         Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(7.dp)) {
@@ -769,6 +783,12 @@ private fun VerifiedWeekendCard(
             Text("Compagnia (andata): ${result.airlines}")
             Text("Scali (andata): ${result.outboundStops}")
             Text("Prezzo round-trip verificato: ${result.price} ${result.currency}", style = MaterialTheme.typography.titleLarge)
+            destinationIata?.takeIf { it.isNotBlank() }?.let { iata ->
+                OpenInMapsButton(
+                    destinationIata = iata,
+                    modifier = Modifier.fillMaxWidth()
+                )
+            }
             Text("Quota live prima della fase di verifica: ${result.searchesLeftBeforeVerification} rimaste")
             Text(
                 "Nota: la query round-trip applica anche la fascia del ritorno, ma il dettaglio esatto del volo di ritorno richiede departure_token e non viene ancora scaricato per risparmiare quota.",
