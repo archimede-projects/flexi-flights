@@ -13,7 +13,7 @@ Aggiornare questo file dopo ogni requisito/decisione/modifica/step completato. `
 Uso personale/APK sideload; zero costi e nessuna carta; niente backend a pagamento; GitHub-only; niente Android Studio locale; CI/build via Actions; test su telefono; mai segreti in repo/chat.
 
 # 2. Requisiti
-Weekend flessibili; N notti ±X; range ampi; max 3 origini; destinazione esclusiva fra max 3 aeroporti / Ovunque / Paese; futuri filtri su scali/compagnia/durata e Maps Intent. Niente destinazioni composite.
+Weekend flessibili; N notti ±X; range ampi; max 3 origini; destinazione esclusiva fra max 3 aeroporti / Ovunque / Paese; Maps Intent sui risultati verificati; futuri filtri su scali/compagnia/durata. Niente destinazioni composite.
 
 # 3. Architettura
 `UI → logica ricerca → provider → cache/database` e **DISCOVERY → VERIFICA → DETTAGLIO**. Evitare prodotti cartesiani: multi-airport nativo, Explore per geografia, Calendar per date, pochi candidati verificati, Account API live, cache TTL 4h, diagnostica.
@@ -38,7 +38,7 @@ Release notes 2026: fix Weekend, `max_duration`, `stops`, e 09/07/2026 “most v
 SerpApi/SearchAPI.io in DataStore locale, mai repo/chat; backup Android disabilitato. SearchAPI.io configurata sul telefono.
 
 # 6. Geografia locale
-`AirportDirectory`: IATA→aeroporto→città→ISO country, circa 180–200 aeroporti, guard anti-typo e base futuri filtri scalo.
+`AirportDirectory`: IATA→aeroporto→città→ISO country, circa 180–200 aeroporti, guard anti-typo e base futuri filtri scalo. v3.7-B riusa questi dati localmente per costruire la query Maps; se un IATA verificato non è presente nella directory, usa come fallback testuale `<IATA> airport` senza introdurre rete VolaFlex.
 
 `CountryAreaCatalog` v3.5: catalogo statico zero-rete `nome italiano → ISO2 → KGMID`, **33 paesi**: Algeria, Austria, Belgio, Brasile, Bulgaria, Canada, Croazia, Danimarca, Egitto, Finlandia, Francia, Germania, Giappone, Grecia, Irlanda, Italia, Malta, Marocco, Messico, Paesi Bassi, Polonia, Portogallo, Regno Unito, Repubblica Ceca, Romania, Spagna, Stati Uniti, Svezia, Svizzera, Thailandia, Tunisia, Turchia, Ungheria. Curato volutamente per non sprecare quota con ID non verificati.
 
@@ -61,6 +61,8 @@ Kotlin/Compose; AGP 9.3.1; Kotlin 2.4.20; Gradle 9.5; Compose BOM 2026.06.00; Na
 
 **v3.6 CI:** run preliminare **#36 FAILURE** per errore Kotlin `NON_LOCAL_SUSPENSION_POINT` in Country eligibility: `diagnostics.log` suspend era dentro `Sequence.mapNotNull`. Corretto trasformando la selezione in ciclo `for` suspend-safe senza cambiare comportamento. Run autorevole **#37 SUCCESS**, build **`0.1.0-dev.37`**, commit `86b3c5aac180c335c7513485896a876d198e4b0e`; `BUILD SUCCESSFUL in 2m 19s`, 49 task. Firma v2/v3 valida, 1 signer, fingerprint canonico invariato. APK SHA-256 `4471b0adf32ee74cba53a864c7d21f6a9f0886eba433e9a67f63f12c08121634`, asset size 9,949,571 byte. Release `dev-latest` verificata su version/commit/run corretti.
 
+**v3.7-B CI:** run **#38 SUCCESS**, build **`0.1.0-dev.38`**, commit applicativo `741af21c6a675eb1ce2d2144703429c5d3337bb5`; `BUILD SUCCESSFUL in 2m 2s`, 49 task. Firma v2/v3 valida, 1 signer, fingerprint canonico invariato. APK SHA-256 `65ddf4e90092b7781eaeea99a681d7dc7a1b888e580eb593f9974edda8fd13c5`, asset size 9,965,955 byte. Release `dev-latest` pubblicata e verificata su version/commit/run corretti.
+
 # 10. Stato e test reali
 Fase 0 CHIUSA. v1 CHIUSA. v2 COMPLETAMENTE CHIUSA.
 
@@ -82,8 +84,11 @@ Build validata: `0.1.0-dev.37`. Implementazione: `WeekendVerificationEngine` con
 
 Validazione reale PASS su tre aspetti: 1) **Weekend → Ovunque:** confermato `Discovery Explore → verifica singolo candidato`; su verifica non riuscita la Discovery resta disponibile e non viene verificato automaticamente un secondo candidato; 2) **Weekend → Paese:** verifica riuscita end-to-end e replay confermato a **0 nuove query**; 3) **canonicalizzazione ordine origini:** test `MXP/BGY` vs `BGY/MXP` conferma cache hit incrociato con ordine invertito e **0 nuove query**. v3.6 è quindi chiusa sia funzionalmente sia lato cache/quota.
 
+## v3.7-B — MAPS INTENT IMPLEMENTATA, CI/RELEASE PASS; TEST DEVICE PENDENTE
+Build da validare su device: `0.1.0-dev.38`. Le card di risultati verificati Weekend (aeroporto/Ovunque/Paese e qualunque pattern) e N notti espongono `Apri in Maps`. L'azione usa solo l'IATA già verificato e `AirportDirectory`: tenta `ACTION_VIEW` con URI `geo:0,0?q=...` indirizzato al package Google Maps; se Maps non è installata intercetta `ActivityNotFoundException` e apre con `ACTION_VIEW` la ricerca web Google Maps. Nessuna Places API/Maps SDK, nessuna nuova dipendenza, nessun cambio Manifest e nessuna modifica a Discovery/Verifica/cache/provider: **0 query SerpApi/SearchAPI aggiuntive e rischio quota nullo**. La repo non aveva source set `app/src/test` né dipendenze test e la spec non impone test UI per questa feature, quindi non è stata introdotta nuova infrastruttura test fuori scope.
+
 # 11. Rischi
-Provider mutevoli; quota condivisa; AirportDirectory/catalogo KGMID non universali; Explore ha avuto regressioni; empty response classificata prudenzialmente; combinazioni estreme sempre protette da quota/cache. Per Country v3.6, un candidato Explore non presente in AirportDirectory è intenzionalmente non eleggibile alla verifica anche se potrebbe essere geograficamente corretto: sicurezza geografica prevale sulla copertura.
+Provider mutevoli; quota condivisa; AirportDirectory/catalogo KGMID non universali; Explore ha avuto regressioni; empty response classificata prudenzialmente; combinazioni estreme sempre protette da quota/cache. Per Country v3.6, un candidato Explore non presente in AirportDirectory è intenzionalmente non eleggibile alla verifica anche se potrebbe essere geograficamente corretto: sicurezza geografica prevale sulla copertura. v3.7-B non aggiunge rischio quota; il rischio residuo è solo UX/device (app Maps presente/assente e risoluzione dell'Intent), da validare sul telefono reale.
 
 # 12. Roadmap
-`v3.1 → v3.2 → v3.3 → v3.4 → v3.5 → v3.6` sono chiuse. **v3.7 è da definire, non implementata.** La scelta deve restare coerente con `DISCOVERY → VERIFICA → DETTAGLIO`, mantenere il controllo stretto della quota SerpApi e privilegiare funzioni che possano riusare dati già verificati o introdurre filtri/integrazioni locali prima di aggiungere nuove chiamate di rete.
+`v3.1 → v3.2 → v3.3 → v3.4 → v3.5 → v3.6` sono chiuse. **v3.7-B Maps Intent è implementata con CI e Release PASS, ma resta da validare sul device reale.** **v3.7-A filtri post-verifica (scali/compagnia/durata) è il prossimo step pianificato ma NON iniziato.** Va mantenuto il principio di riusare i dati già verificati e non moltiplicare le chiamate SerpApi.
